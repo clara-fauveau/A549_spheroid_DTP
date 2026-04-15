@@ -383,15 +383,15 @@ down_genes_list <- lapply(list_datasets, function(dataset) {
 
 # Plot the Venn diagram of Upregulated genes
 ggVennDiagram(up_genes_list, set_size = 5, label = "count", label_size = 3) + ggtitle("Upregulated Genes")+scale_fill_gradient(low = "#FF6B6B", high="#490000")+ scale_x_continuous(expand = expansion(mult = .2))
-
+ggsave("Fig_3C1A.png", path = path_to_save, width=6, height = 6)
 ggVennDiagram(up_genes_list, set_size = 0, label = "count", label_size = 0) + ggtitle("Upregulated Genes")+scale_fill_gradient(low = "#FF6B6B", high="#490000")+ scale_x_continuous(expand = expansion(mult = .2))
-ggsave("Fig_3C1.png", path = path_to_save, width=6, height = 6)
+ggsave("Fig_3C1B.png", path = path_to_save, width=6, height = 6)
 
 # Plot the Venn diagram of downregulated genes
 ggVennDiagram(down_genes_list, set_size = 5, label = "count", label_size = 3) + ggtitle("Downregulated Genes") + scale_x_continuous(expand = expansion(mult = .2))
-
+ggsave("Fig_3C2A.png", path = path_to_save, width=6, height = 6)
 ggVennDiagram(down_genes_list, set_size = 0, label = "count", label_size = 0) + ggtitle("Downregulated Genes")+ scale_x_continuous(expand = expansion(mult = .2))
-ggsave("Fig_3C2.png", path = path_to_save, width=6, height = 6)
+ggsave("Fig_3C2B.png", path = path_to_save, width=6, height = 6)
 
 
 # Create a vector containing the conserved genes
@@ -512,7 +512,7 @@ data_patient$recist <- factor(
   levels = c("naive", "PR/SD", "PD")
 )
 DimPlot(data_patient,reduction = "tsne",group.by = "recist",cols = c("#6F9BF8", "#E87D72", "#53B74C" ))
-ggsave( "Fig_2E1.png", path = path_to_save, width=4, height = 3)
+ggsave( "Fig_3E.png", path = path_to_save, width=4, height = 3)
 
 #Add a metadata column named "recist_timing" indicating the RECIST score and timepoint (early or late) at the time of biopsy 
 data_patient$recist_timing <- paste(data_patient$recist, data_patient$biopsy_timing, sep = "_")
@@ -548,13 +548,13 @@ FeaturePlot(
   features = "DTP_signature_DOWN",
   reduction = "tsne"
 )+ scale_color_gradientn(colors = c("grey90", "#B3D9FF", "#0073E6", "#001F4D"))
-ggsave( "Fig_2E2.png", path = path_to_save, width=4, height = 3)
+ggsave( "Fig_3F1.png", path = path_to_save, width=4, height = 3)
 FeaturePlot(
   data_patient,
   features = "DTP_signature_UP",
   reduction = "tsne"
 )+ scale_color_gradientn(colors = c("lightgrey", "pink", "red", "darkred"))
-ggsave("Fig_2E3.png", path = path_to_save, width=4, height = 3)
+ggsave("Fig_3F2.png", path = path_to_save, width=4, height = 3)
 
 rm(expr_mat, expr_ranks, dtp_up_auc, dtp_down_auc, dtp_up_scores, dtp_down_scores)
 ```
@@ -636,7 +636,7 @@ rownames(heatmap_matrix_NES) <- heatmap_data$dataset
 heatmap_matrix_pval <- as.matrix(heatmap_data_pvalue[, -1])
 rownames(heatmap_matrix_pval) <- heatmap_data_pvalue$dataset
 
-svglite(file.path(path_to_save, "Fig_3F.svg"),width = 5, height = 4)
+svglite(file.path(path_to_save, "Fig_3G.svg"),width = 5, height = 4)
 Heatmap(
   heatmap_matrix_NES,
   name = "NES",
@@ -672,7 +672,7 @@ dev.off()
 rm(markers_tr, markers_PD, markers_PRSD, list_comparisons, ranked_list, gsea_results_df, gsea_results, gsea_results_df_DTP, heatmap_data, heatmap_data_pvalue, heatmap_matrix_NES, heatmap_matrix_pval)
 ```
 
-### Comparison PD, PR/SD across timepoints (figure 3.G)
+### Comparison PD, PR/SD across timepoints (figure 3.H)
 
 ```{r}
 # Generation of the DEG for the GSEA
@@ -741,7 +741,7 @@ rownames(heatmap_matrix_NES) <- heatmap_data$dataset
 heatmap_matrix_pval <- as.matrix(heatmap_data_pvalue[, -1])
 rownames(heatmap_matrix_pval) <- heatmap_data_pvalue$dataset
 
-svglite(file.path(path_to_save, "Fig_3G.svg"),width = 5, height = 4)
+svglite(file.path(path_to_save, "Fig_3H.svg"),width = 5, height = 4)
 Heatmap(
   heatmap_matrix_NES,
   name = "NES",
@@ -866,7 +866,7 @@ heatmap_matrix_pval <- as.matrix(heatmap_data_pvalue[, -1])
 rownames(heatmap_matrix_pval) <- heatmap_data_pvalue$dataset
 
 # Heatmap generation
-svglite(file.path(path_to_save, "Fig_3H.svg"))
+svglite(file.path(path_to_save, "Fig_3I.svg"))
 Heatmap(
   heatmap_matrix_NES,
   name = "NES",
@@ -924,7 +924,7 @@ heatmap_matrix_pval <- as.matrix(heatmap_data_pvalue[, -1])
 rownames(heatmap_matrix_pval) <- heatmap_data_pvalue$pathway
 
 # Heatmap generation
-svglite(file.path(path_to_save, "Fig_S3A.svg"),width = 7, height = 4)
+svglite(file.path(path_to_save, "Fig_S4A.svg"),width = 7, height = 4)
 Heatmap(
   heatmap_matrix_NES,
   name = "NES",

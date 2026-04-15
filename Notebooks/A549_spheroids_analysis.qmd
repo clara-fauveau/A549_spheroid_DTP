@@ -217,7 +217,7 @@ ggsave("Fig_2E.png", path = path_to_save, height = 4,width = 4)
 rm(top_features, feature_imp)
 ```
 
-## UMAP of NRF2 and Hypoxia
+### UMAP of NRF2 and Hypoxia
 
 ```{r}
 # Extract the expression matrix 
@@ -291,7 +291,7 @@ rm(milestone_info,milestone_vector,common_cells, cell_milestone_mapping)
 
 #Plot of NRF2-associated genes across the different milestones
 VlnPlot(data, features = c("NQO1","FTL","CPLX2","EPHX1", "ALDH3A1"), group.by = "Milestone", stack = TRUE, flip = TRUE, split.by = "Milestone", cols= c("#FA8A7D","#F6FBB4", "#A0CBCF","#C2BEDC"))
-ggsave("Fig_S2C.png", path = path_to_save)
+ggsave("Fig_S2B.png", path = path_to_save)
 
 #Plot of the NRF2 score generated with AUCell across the different milestones
 VlnPlot(data, features = "NRF2score", group.by = "Milestone", flip = TRUE, cols= c("#FA8A7D","#F6FBB4", "#A0CBCF","#C2BEDC"),pt.size = 0)
@@ -566,7 +566,7 @@ ggsave("Fig_2M.png", path = path_to_save,width = 4, height = 2)
 
 ```{r}
 plotEnrichment(Signatures[["CSC_Herreros_Pomares"]], ranks) + labs(title = "CSC Signature")
-ggsave("Fig_S1F.png", path = path_to_save, width=4, height = 3)
+ggsave("Fig_S3B.png", path = path_to_save, width=4, height = 3)
 ```
 
 
@@ -601,7 +601,7 @@ ggplot(fgseaResTidy, aes(reorder(pathway, NES), NES)) +
   labs(x="Pathway", y="Normalized Enrichment Score",
        title="SENESCENCE SIGNATURES") + 
   theme_minimal()
-ggsave("Fig_S1G.png", path = path_to_save, height = 4)
+ggsave("Fig_S3C.png", path = path_to_save, height = 4)
 
 rm(fgseaRes, fgseaResTidy, pathways, m_df, pathways_senescence)
 ```
@@ -635,7 +635,7 @@ gsea_res <- GSEA(
 # Plot the results
 heatplot(gsea_res, foldChange = ranks, showCategory = 5) +
   scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0)
-ggsave("Fig_S1I.png", path = path_to_save, height=3, width=13)
+ggsave("Fig_S3E.png", path = path_to_save, height=3, width=13)
 
 rm(m_df, pathways, hallmark_sets, term2gene, gsea_res, ranks)
 ```
@@ -696,7 +696,7 @@ ggsave("Fig_2L.png", path = path_to_save,width = 4, height = 5)
 
 ```{r}
 VlnPlot(data, features = c("CPT1A", "DECR1"), group.by = "treatment", stack = TRUE, flip = TRUE)
-ggsave("Fig_S1E.png", path = path_to_save,width = 5, height = 3)
+ggsave("Fig_S3A.png", path = path_to_save,width = 5, height = 3)
 ```
 
 #### Hallmark KRAS signaling DOWN
@@ -716,7 +716,7 @@ genes_to_plot <- top20_up_genes$gene
 DotPlot(data, 
         features = genes_to_plot, group.by = "treatment",  scale = T) +
   coord_flip() 
-ggsave("Fig_S1H.png", path = path_to_save)
+ggsave("Fig_S3D.png", path = path_to_save)
 
 rm(markers_KRAS_SIGNALING_DN, top20_up_genes)
 ```
