@@ -1,0 +1,772 @@
+---
+title: "A549_spheroids_analysis"
+format:
+  html:
+    toc: true
+    number-sections: true
+execute:
+  cache: false
+  freeze: auto
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+## Package & object/signatures loading
+
+```{r}
+#Load Package
+library(Matrix)
+library(dplyr)
+library(Seurat)
+library(patchwork)
+library(ggplot2)
+library(cowplot)
+library(dyno)
+library(dynwrap)
+library(tislingshot)
+library(SingleCellExperiment)
+library(hdf5r)
+library(hexbin)
+library(tibble)
+library(dplyr)
+library(fgsea)
+library(msigdbr)
+library(reshape2)
+library(ComplexHeatmap)
+library (tidyr)
+library(colorRamp2)
+library(readxl)
+library(VennDiagram)
+library(grid)
+library(clusterProfiler)
+library(enrichplot)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(ggVennDiagram)
+library(babelwhale)
+library(openxlsx2)
+library(AUCell)
+library(svglite)
+
+# INPUT : Load the A549 spheroid seurat object 
+data <- readRDS(file = "/Users/fauveauc/Documents/R_studio/A549 analysis/seurat_object_A549_pers_final.rds")
+
+# INPUT : Obtain signatures from the supplementary tables of the publication :
+  #Load the excel file
+df <- read_excel("/Users/fauveauc/Documents/R_studio/A549 analysis/Supplemental_tables.xlsx", sheet = "Table S.7")
+  # transfrom it into a list containing the different signatures 
+Signatures <- lapply(seq_len(nrow(df)), function(i) {
+  g <- unlist(df[i, -1], use.names = FALSE)
+  g <- as.character(g)
+  g <- trimws(g)
+  g <- g[!is.na(g) & g != ""]
+  unique(g)
+})
+names(Signatures) <- df[[1]]
+
+# OUTPUT: Determine the path to the directory where the figures and table will be saved
+path_to_save <- "/Users/fauveauc/Documents/R_studio/A549 analysis/figures_and_tables"
+
+
+rm(df)
+```
+
+## Dataset overview
+
+### UMAPs
+
+```{r}
+DimPlot(data, reduction = "umap.harmony", group.by = "treatment")
+ggsave("Fig_2A.png", path = path_to_save)
+DimPlot(data, reduction = "umap.harmony", group.by = "harmony_clusters", label = T)
+ggsave("Fig_2B.png", path = path_to_save)
+```
+
+### Distribution per cluster
+
+```{r}
+
+# Samples distribution within the different clusters
+counts <- group_by(data@meta.data, sample, harmony_clusters) %>% summarise(count = n())
+Percentage_Cluster<- counts %>% group_by(harmony_clusters) %>% mutate(ValuePer=(count/sum(count)*100)) %>% ungroup()
+
+ggplot(Percentage_Cluster, aes(harmony_clusters,ValuePer,fill=sample))+
+ geom_bar(stat = 'identity')
+
+
+# Treatment distribution within the different clusters
+counts <- group_by(data@meta.data, treatment, harmony_clusters) %>% summarise(count = n())
+Percentage_Cluster<- counts %>% group_by(harmony_clusters) %>% mutate(ValuePer=(count/sum(count)*100)) %>% ungroup()
+
+ggplot(Percentage_Cluster, aes(harmony_clusters,ValuePer,fill=treatment))+
+ geom_bar(stat = 'identity')
+
+
+# Biological replicates distribution within the different clusters
+counts <- group_by(data@meta.data, replicate, harmony_clusters) %>% summarise(count = n())
+Percentage_Cluster<- counts %>% group_by(harmony_clusters) %>% mutate(ValuePer=(count/sum(count)*100)) %>% ungroup()
+
+ggplot(Percentage_Cluster, aes(harmony_clusters,ValuePer,fill=replicate))+
+ geom_bar(stat = 'identity')
+ggsave("Fig_S1C.png", path = path_to_save)
+
+
+rm(Percentage_Cluster, counts)
+```
+
+### Clusters markers
+
+```{r}
+Idents(data)<-"harmony_clusters"
+DEG_clusters_data<- FindAllMarkers(data, only.pos = TRUE, logfc.threshold = 0.25, min.pct = 0.3)
+DEG_clusters_data<- dplyr::filter(DEG_clusters_data, p_val_adj<0.05)
+
+#Save the list of markers for each clusters 
+write_xlsx(DEG_clusters_data, file.path(path_to_save, "Table_S1.xlsx"))
+
+top3_markers <- data.frame()
+
+for (cluster in levels(data))
+{
+b <- arrange(DEG_clusters_data[DEG_clusters_data$cluster == cluster,],p_val_adj -avg_log2FC,-pct.1)
+if(nrow(b) > 3) {b<- b[1:3,] }
+top3_markers <- rbind(top3_markers, b)
+}
+rm(b)
+
+DotPlot(data, assay = 'RNA',features = top3_markers$gene, dot.scale = 5) + RotatedAxis()
+ggsave("Fig_S1D.png", path = path_to_save, width=11 )
+
+rm(DEG_clusters_data,top3_markers,cluster)
+```
+
+## Cell cycle Analysis
+
+```{r}
+# cell cycle scoring
+s.genes <- cc.genes$s.genes
+g2m.genes <- cc.genes$g2m.genes
+
+data <- CellCycleScoring(data, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+
+#Visualization
+DimPlot(data, group.by = "Phase", reduction = "umap.harmony", label = FALSE, pt.size = 0.7)
+ggplot(data@meta.data, aes(x=treatment, fill=Phase)) + geom_bar(position = "fill")
+
+rm(g2m.genes, s.genes)
+```
+
+## Trajectory
+
+### Trajectory generation
+
+```{r}
+
+#The dataset is created with the expression matrix, the grouping variable (treatment) and the dimensionality reduction coordinates (UMAP) from the Seurat object. The expression matrix is transposed to have cells as rows and genes as columns, which is the format expected by dyno.
+dataset <- wrap_expression(counts = t(data@assays$RNA$counts), expression = t(data@assays$RNA$data))
+dataset <- add_grouping(dataset, as.character(data$treatment))
+dataset <- add_dimred(dataset, data@reductions$umap.harmony@cell.embeddings)
+dataset$grouping
+
+#The trajectory is inferred using the Slingshot method
+model <- infer_trajectory(dataset, method = tislingshot::ti_slingshot())
+
+
+
+# Milestones are renamed with letters
+get_milestone_labelling(model)
+new_names <- c("2" = "A", "1" = "B", "3" = "C", "4" = "D")
+model <- label_milestones(model, new_names)
+get_milestone_labelling(model)
+
+
+#Visualization
+plot_dimred(model, color_cells = "auto", size_transitions = 1, label_milestones = TRUE)
+
+plot_dimred(model, dimred = dataset$dimred, color_cells = "pseudotime", 
+            grouping = dataset$grouping, size_transitions = 1, label_milestones = TRUE)
+
+plot_dimred(model, dimred = dataset$dimred, color_cells = "milestone", 
+            grouping = dataset$grouping, size_transitions = 1, label_milestones = TRUE)
+ggsave("Fig_2D.png", path = path_to_save,height = 5)
+
+rm(new_names)
+```
+
+### Heatmap of important features
+
+```{r}
+#Calculation of the an importance score for each gene (reflects gene contribution to the trajectory)
+feature_imp <- calculate_overall_feature_importance(model, expression_source = dataset$expression)
+
+#Save the table of genes with their importance score
+write_xlsx(feature_imp, file.path(path_to_save, "Table_S2.xlsx"))
+
+#Heatmap of the 20 most important genes
+top_features <- feature_imp %>% 
+  top_n(20, importance) %>% 
+  pull(feature_id)
+plot_heatmap(
+  model, 
+  expression_source = dataset$expression, 
+  features_oi = top_features
+)
+ggsave("Fig_2E.png", path = path_to_save, height = 4,width = 4)
+
+rm(top_features, feature_imp)
+```
+
+## UMAP of NRF2 and Hypoxia
+
+```{r}
+# Extract the expression matrix 
+expr_mat <- GetAssayData(data, assay = "RNA")
+
+# Build AUCell rankings
+expr_ranks <- AUCell_buildRankings(expr_mat)
+
+# Calculate AUCell score for the pathway gene set
+nrf2_auc <- AUCell_calcAUC(list(NRF2 = Signatures[["NRF2_SIGNATURE_NAMANI"]]), expr_ranks)
+hypoxia_auc <- AUCell_calcAUC(list(hypoxia = Signatures[["HALLMARK_HYPOXIA"]]), expr_ranks)
+
+# Extract the score for each cell
+nrf2_scores <- as.numeric(getAUC(nrf2_auc)["NRF2", ])
+hypoxia_scores <- as.numeric(getAUC(hypoxia_auc)["hypoxia", ])
+
+# Add the score to Seurat metadata
+data$NRF2score <- nrf2_scores
+data$hypoxiascore <- hypoxia_scores
+
+# Plot on UMAP
+FeaturePlot(
+  data,
+  features = "hypoxiascore",
+  reduction = "umap.harmony"
+)+ scale_color_gradientn(colors = c("grey90", "#B3D9FF", "#0073E6", "#001F4D"))
+ggsave("Fig_2F1.png", path = path_to_save, width=4, height = 3)
+FeaturePlot(
+  data,
+  features = "NRF2score",
+  reduction = "umap.harmony"
+)+ scale_color_gradientn(colors = c("lightgrey", "pink", "red", "darkred"))
+ggsave("Fig_2F2.png", path = path_to_save, width=4, height = 3)
+
+rm(expr_mat, expr_ranks,nrf2_auc, nrf2_scores, hypoxia_auc, hypoxia_scores)
+```
+
+### Violin plot of NRF2-associated genes across milestones
+
+#### Creation of a meta-data column attributing a milestone state to each cells
+
+```{r}
+# Get milestone score from each cells
+milestone_info <- model$milestone_percentages
+
+# Identify the milestone with the highest association for each cell
+cell_milestone_mapping <- milestone_info %>%
+  group_by(cell_id) %>%
+  top_n(1, wt = percentage) %>%
+  ungroup()
+
+milestone_vector <- setNames(cell_milestone_mapping$milestone_id, cell_milestone_mapping$cell_id)
+
+# Check if all cell IDs exist in the Seurat object
+common_cells <- intersect(rownames(data@meta.data), names(milestone_vector))
+
+# Add milestone information as metadata in the Seurat object
+data <- AddMetaData(data, metadata = milestone_vector[common_cells], col.name = "Milestone")
+
+data$Milestone <- recode(data$Milestone,   `1` = "B",  `2` = "A" , `3` = "C",  `4` = "D")
+
+# Check the updated milestones
+table(data$Milestone)
+
+rm(milestone_info,milestone_vector,common_cells, cell_milestone_mapping)
+```
+
+#### Violin plot
+
+```{r}
+
+#Plot of NRF2-associated genes across the different milestones
+VlnPlot(data, features = c("NQO1","FTL","CPLX2","EPHX1", "ALDH3A1"), group.by = "Milestone", stack = TRUE, flip = TRUE, split.by = "Milestone", cols= c("#FA8A7D","#F6FBB4", "#A0CBCF","#C2BEDC"))
+ggsave("Fig_S2C.png", path = path_to_save)
+
+#Plot of the NRF2 score generated with AUCell across the different milestones
+VlnPlot(data, features = "NRF2score", group.by = "Milestone", flip = TRUE, cols= c("#FA8A7D","#F6FBB4", "#A0CBCF","#C2BEDC"),pt.size = 0)
+ggsave("Fig_2G.png", path = path_to_save, width = 7)
+
+#Statistical comparison of the NRF2 score across the different milestones
+kruskal.test(NRF2score ~ Milestone, data = data@meta.data)
+pairwise.wilcox.test(data$NRF2score,data$Milestone,p.adjust.method = "BH")
+
+rm(model,dataset)
+```
+
+
+## Pathway analysis
+
+### Heatmap of Hallmark pathways in clusters + treatment/cell cycle/milestone distribution
+
+#### Run the GSEA
+
+```{r}
+# Generate the DEG for each clusters
+Idents(data)<-"harmony_clusters"
+markers_clusters<- FindAllMarkers(data,  min.pct = 0.3)
+
+
+# Generate the gene list for each cluster, ranked by log2FC
+ranked_gene_lists <- markers_clusters %>%
+  group_by(cluster) %>%
+  arrange(desc(avg_log2FC)) %>%
+  group_split() %>%
+  setNames(unique(markers_clusters$cluster))
+
+# Convert it to named vectors for fgsea
+ranked_lists <- lapply(ranked_gene_lists, function(df) {
+  setNames(df$avg_log2FC, df$gene)  # Named vector with logFC values
+})
+
+# Load MSigDB gene sets
+m_df <- msigdbr(species = "Homo sapiens", category = "H")
+fgsea_sets <- m_df %>% split(x = .$gene_symbol, f = .$gs_name)
+
+
+# Run GSEA for each cluster
+gsea_results <- lapply(names(ranked_lists), function(cluster) {
+  fgsea(pathways = fgsea_sets, stats = ranked_lists[[cluster]])
+})
+names(gsea_results) <- names(ranked_lists)
+
+# Convert results to a data frame
+gsea_results_df <- do.call(rbind, Map(cbind, gsea_results, cluster = names(gsea_results)))
+
+
+
+rm(m_df, markers_clusters, ranked_gene_lists, ranked_lists, gsea_results)
+```
+
+#### GSEA results preparation for the heatmap
+
+```{r}
+
+#create a data frame with patwhays and pvalues & removes pathway not significantly modified in at least one cluster and values with NA
+heatmap_data_pvalue <- dcast(gsea_results_df, pathway ~ cluster, value.var = "padj", fill = 1)
+heatmap_data_pvalue<- heatmap_data_pvalue[apply(heatmap_data_pvalue[, -1], 1, function(x) any(x < 0.01)), ]
+
+
+#create a data frame with patwhays and NES 
+heatmap_data <- dcast(gsea_results_df, pathway ~ cluster, value.var = "NES", fill = 0)
+#removes pathway not significantly enriched in at least one clusters (using the heatmap_data_pvalue)
+heatmap_data <- heatmap_data[heatmap_data$pathway %in% heatmap_data_pvalue$pathway, ]
+
+# Filter out pathways whose NES is not superior to 1 in at least one cluster
+heatmap_data <- heatmap_data[apply(heatmap_data[, -1], 1, function(x) any(x > 1)), ]
+heatmap_data_pvalue <- heatmap_data_pvalue[heatmap_data_pvalue$pathway %in% heatmap_data$pathway, ]
+
+# Convert to matrix
+heatmap_matrix_NES <- as.matrix(heatmap_data[, -1])
+rownames(heatmap_matrix_NES) <- heatmap_data$pathway
+heatmap_matrix_pval <- as.matrix(heatmap_data_pvalue[, -1])
+rownames(heatmap_matrix_pval) <- heatmap_data_pvalue$pathway
+
+rm(heatmap_data, heatmap_data_pvalue, gsea_results_df)
+```
+
+#### Preparation of cell cycle distribution per clusters
+
+```{r}
+
+# Create a table of counts for each cluster-phase combination
+counts_df <- data@meta.data %>%
+  group_by(harmony_clusters, Phase)%>%
+  tally()%>%
+  ungroup() %>%
+  mutate(harmony_clusters = as.numeric(as.character(harmony_clusters)))%>%
+  arrange(harmony_clusters)
+
+# Reshape the data to have clusters as rows and phases as columns
+cell_repartition_matrix <- counts_df %>%
+  spread(key = Phase, value = n, fill = 0)
+
+# Calculate the proportions by dividing by the row sum (cluster total)
+cell_repartition_matrix_prop <- cell_repartition_matrix %>%
+  mutate(total_cells = rowSums(across(-harmony_clusters)),  
+         across(-c(harmony_clusters, total_cells), ~ . / total_cells, .names = "prop_{.col}"))  
+
+ cell_repartition_matrix_prop <- cell_repartition_matrix_prop[, !names(cell_repartition_matrix_prop) %in% c("G1", "S", "G2M","total_cells")]
+
+# Ensure the matrix is numeric while keeping row and column names
+cell_repartition_matrix_prop <- as.matrix(cell_repartition_matrix_prop)  
+storage.mode(cell_repartition_matrix_prop) <- "numeric"  
+
+# Transpose the matrix
+cell_repartition_matrix_transposed <- t(cell_repartition_matrix_prop)
+colnames(cell_repartition_matrix_transposed) <- as.character(cell_repartition_matrix_transposed[1, ])
+cell_repartition_matrix_transposed <- cell_repartition_matrix_transposed[-1, , drop = FALSE]
+cell_repartition_matrix_prop <- t(cell_repartition_matrix_transposed)
+
+# Prepare data for the heatmap
+hac = HeatmapAnnotation(cell_cycle = anno_barplot(cell_repartition_matrix_prop, gp = gpar(fill= c("#F8766D","#00BA38","#619CFF")),  bar_width = 1))
+
+
+```
+
+#### Preparation of control/treated cell distribution per clusters
+
+```{r}
+
+# Create a table of counts for each cluster-treatment combination
+counts_df <- data@meta.data %>%
+  group_by(harmony_clusters, treatment) %>%
+  tally() %>%
+  ungroup() %>%
+  mutate(harmony_clusters = as.numeric(as.character(harmony_clusters))) %>%
+  arrange(harmony_clusters)
+
+
+# Reshape the data to have clusters as rows and treatment as columns
+cell_repartition_matrix <- counts_df %>%
+  spread(key = treatment, value = n, fill = 0)
+
+# Calculate the proportions by dividing by the row sum (cluster total)
+cell_repartition_matrix_prop <- cell_repartition_matrix %>%
+  mutate(total_cells = rowSums(across(-harmony_clusters)),  
+         across(-c(harmony_clusters, total_cells), ~ . / total_cells, .names = "prop_{.col}"))  
+ cell_repartition_matrix_prop <- cell_repartition_matrix_prop[, !names(cell_repartition_matrix_prop) %in% c("control", "treated","total_cells")]
+
+# Transpose the matrix
+cell_repartition_matrix_transposed <- t(cell_repartition_matrix_prop)
+colnames(cell_repartition_matrix_transposed) <- as.character(cell_repartition_matrix_transposed[1, ])
+cell_repartition_matrix_transposed <- cell_repartition_matrix_transposed[-1, , drop = FALSE]
+cell_repartition_matrix_prop <- t(cell_repartition_matrix_transposed)
+
+# Prepare data for the heatmap
+hat = HeatmapAnnotation(treatment = anno_barplot(cell_repartition_matrix_prop, gp = gpar(fill= c("#F8766D","#00BFC4")),  bar_width = 1))
+
+```
+
+#### Preparation of milestone distribution per clusters
+
+```{r}
+
+# Create a table of counts for each cluster-milestone combination
+counts_df <- data@meta.data %>%
+  group_by(harmony_clusters, Milestone) %>%
+  tally() %>%
+  ungroup() %>%
+  mutate(harmony_clusters = as.numeric(as.character(harmony_clusters))) %>%
+  arrange(harmony_clusters)
+
+
+# Reshape the data to have clusters as rows and treatment as columns
+cell_repartition_matrix <- counts_df %>%
+  spread(key = Milestone, value = n, fill = 0)
+
+# Calculate the proportions by dividing by the row sum (cluster total)
+cell_repartition_matrix_prop <- cell_repartition_matrix %>%
+  mutate(total_cells = rowSums(across(-harmony_clusters)),  
+         across(-c(harmony_clusters, total_cells), ~ . / total_cells, .names = "prop_{.col}"))  
+ cell_repartition_matrix_prop <- cell_repartition_matrix_prop[, !names(cell_repartition_matrix_prop) %in% c("A", "B","C","D","total_cells")]
+
+# Transpose the matrix
+cell_repartition_matrix_transposed <- t(cell_repartition_matrix_prop)
+colnames(cell_repartition_matrix_transposed) <- as.character(cell_repartition_matrix_transposed[1, ])
+cell_repartition_matrix_transposed <- cell_repartition_matrix_transposed[-1, , drop = FALSE]
+cell_repartition_matrix_prop <- t(cell_repartition_matrix_transposed)
+
+# Prepare data for the heatmap
+ham = HeatmapAnnotation(Milestone = anno_barplot(cell_repartition_matrix_prop, gp = gpar(fill= c("#FA8A7D","#F6FBB4", "#A0CBCF","#C2BEDC")),  bar_width = 1))
+
+rm(cell_repartition_matrix, counts_df,cell_repartition_matrix_prop,cell_repartition_matrix_transposed)
+
+```
+
+#### Heatmap generation
+
+```{r}
+
+svglite(file.path(path_to_save, "Fig_2C.svg"), width = 7, height = 7)
+
+Heatmap(
+  heatmap_matrix_NES,
+  name = "NES",
+  col = colorRamp2(c(min(heatmap_matrix_NES), 0, max(heatmap_matrix_NES)), c("blue", "white", "red")),
+  cluster_rows = TRUE,
+  cluster_columns = TRUE,
+  show_column_names = TRUE,
+  show_row_names = TRUE,
+  row_names_gp = gpar(fontsize = 8),  # Adjust row name size
+  row_names_max_width = unit(20, "cm"),
+  heatmap_legend_param = list(
+    title = "NES",
+    labels_gp = gpar(fontsize = 10, fontface = "italic"),  # Adjust legend label font
+    legend_width = unit(15, "cm")   # Adjust legend width
+  ),
+    cell_fun = function(j, i, x, y, w, h, fill) {
+   # Check for NA values first
+    
+      # Add asterisks based on p-value thresholds
+      if (heatmap_matrix_pval[i, j] < 0.001) {
+        grid.text("∗∗∗", x, y, gp = gpar(fontsize = 13, col = "black"))
+      } else if (heatmap_matrix_pval[i, j] < 0.01) {
+        grid.text("∗∗", x, y, gp = gpar(fontsize = 13, col = "black"))
+      } else if (heatmap_matrix_pval[i, j] < 0.05) {
+        grid.text("∗", x, y, gp = gpar(fontsize = 13, col = "black"))
+      
+    }
+  },
+  top_annotation = c(hat, hac,ham))# Combine the annotations
+
+dev.off()
+
+rm(hac, ham, hat, heatmap_matrix_NES, heatmap_matrix_pval)
+
+```
+
+### Enrichment plots
+#### Generation of the ranked gene list for GSEA
+
+```{r}
+#Generate the DEG list 
+Idents(data)<-"treatment"
+markers<- FindMarkers(data,ident.1 = "treated" ,ident.2 = "control" ,logfc.threshold = 0, min.pct = 0.3)
+markers$gene<- rownames(markers) 
+
+#Save the table of deregulated genes 
+write_xlsx(markers, file.path(path_to_save, "Table_S3.xlsx"))
+
+#Verification of the gene order & comparison sens
+markers$stat <- markers$avg_log2FC 
+markers %>% arrange(desc(stat), desc(stat)) %>% head(10)
+Idents(data) <- data@meta.data$treatment
+FeaturePlot(data, features = c("ABCA12"), keep.scale = "feature", pt.size = 1.2,
+            label = TRUE, reduction="umap.harmony", order = T)
+
+
+#Rank  table and create a list with the gene and their rank
+markers$gene <- rownames(markers)
+ranks <- markers %>% arrange(desc(stat)) %>% dplyr::select(gene, stat)
+
+ranks <- deframe(ranks)
+head(ranks)
+
+```
+
+#### GOBP_Fatty_acid_beta_oxidation
+
+```{r}
+plotEnrichment(Signatures[["GOBP_FATTY_ACID_BETA_OXIDATION"]], ranks) + labs(title = "GOBP_FATTY_ACID_BETA_OXIDATION")
+ggsave("Fig_2M.png", path = path_to_save,width = 4, height = 2)
+```
+
+#### CSC signature
+
+```{r}
+plotEnrichment(Signatures[["CSC_Herreros_Pomares"]], ranks) + labs(title = "CSC Signature")
+ggsave("Fig_S1F.png", path = path_to_save, width=4, height = 3)
+```
+
+
+### Bar Plot
+
+#### Senescence signatures
+
+```{r}
+# Load pathways from MSigDB and select the ones related to senescence
+m_df <- msigdbr(species = "Homo sapiens")
+pathways <- m_df %>% split(x = .$gene_symbol, f = .$gs_name)
+pathways_senescence<- list(
+  "GOBP_REGULATION_OF_CELLULAR_SENESCENCE"= pathways$GOBP_REGULATION_OF_CELLULAR_SENESCENCE,
+  "KAMMINGA_SENESCENCE"= pathways$KAMMINGA_SENESCENCE,
+  "CHICAS_RB1_TARGETS_SENESCENT"= pathways$CHICAS_RB1_TARGETS_SENESCENT,
+  "GOBP_CELLULAR_SENESCENCE"= pathways$GOBP_CELLULAR_SENESCENCE,
+  "TANG_SENESCENCE_TP53_TARGETS_UP"= pathways$TANG_SENESCENCE_TP53_TARGETS_UP,
+  "FRIDMAN_SENESCENCE_DN"= pathways$FRIDMAN_SENESCENCE_DN)
+
+# Run the fgsea
+fgseaRes <- fgsea(pathways_senescence, stats = ranks)
+
+# Organize the table
+fgseaResTidy <- fgseaRes %>%
+  as_tibble() %>%
+  arrange(desc(NES))
+
+# Plot the results 
+ggplot(fgseaResTidy, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill= padj)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="SENESCENCE SIGNATURES") + 
+  theme_minimal()
+ggsave("Fig_S1G.png", path = path_to_save, height = 4)
+
+rm(fgseaRes, fgseaResTidy, pathways, m_df, pathways_senescence)
+```
+
+
+#### GSEA Leading genes between Mtorc1 signalling, Glycolysis & Cholesterol homeostasis pathways
+
+```{r}
+# Load pathways from MSigDB and select the ones you want to visualize
+m_df <- msigdbr(species = "Homo sapiens", category = "H")
+pathways <- m_df %>% split(x = .$gene_symbol, f = .$gs_name)
+
+hallmark_sets <- list(
+  "HALLMARK_MTORC1_SIGNALING" = pathways$HALLMARK_MTORC1_SIGNALING,
+  "HALLMARK_GLYCOLYSIS" = pathways$HALLMARK_GLYCOLYSIS,
+  "HALLMARK_CHOLESTEROL_HOMEOSTASIS" = pathways$HALLMARK_CHOLESTEROL_HOMEOSTASIS)
+
+# Convert to TERM2GENE format — ensure gene names are in second column
+term2gene <- do.call(rbind, lapply(names(hallmark_sets), function(term) {
+  data.frame(term = term, gene = hallmark_sets[[term]])
+}))
+
+# Run the GSEA
+gsea_res <- GSEA(
+  geneList = ranks,
+  TERM2GENE = term2gene,  
+  pvalueCutoff = 0.05,
+  verbose = TRUE,
+)
+
+# Plot the results
+heatplot(gsea_res, foldChange = ranks, showCategory = 5) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0)
+ggsave("Fig_S1I.png", path = path_to_save, height=3, width=13)
+
+rm(m_df, pathways, hallmark_sets, term2gene, gsea_res, ranks)
+```
+
+## Gene-level analysis
+#### Persistence markers table 
+```{r}
+#Generate the marker list 
+Idents(data)<-"treatment"
+persistence_markers<- FindMarkers(data,ident.1 = "treated" ,ident.2 = "control" , only.pos = TRUE, logfc.threshold = 0.25, min.pct = 0.3)
+persistence_markers<-  dplyr::filter(persistence_markers, p_val_adj<0.05)
+persistence_markers$gene <- rownames(persistence_markers)
+
+#Save the table of deregulated genes 
+write_xlsx(persistence_markers, file.path(path_to_save, "Table_S4.xlsx"))
+
+rm(persistence_markers)
+
+```
+
+
+#### Pemetrexed resistance-associated genes
+
+```{r}
+VlnPlot(data, features = c("DHFR", "GART","TYMS", "ABCC4", "SLC46A1" ), group.by = "treatment", stack = TRUE, flip = TRUE) 
+ggsave("Fig_2H1.png", path = path_to_save,width = 4, height = 4)
+```
+
+#### Cisplatin resistance-associated genes
+
+```{r}
+VlnPlot(data, features = c( "GSS","ABCC2", "ERCC1", "ERCC4","CDKN1A"), group.by = "treatment", stack = TRUE, flip = TRUE) 
+ggsave("Fig_2H2.png", path = path_to_save,width = 4, height = 4)
+```
+
+#### Persistence-associated genes
+
+```{r}
+VlnPlot(data, features = c("PINK1", "CD44","NOTCH3", "ALDH1A1", "HDAC1"), group.by = "treatment", stack = TRUE, flip = TRUE) 
+ggsave("Fig_2J.png", path = path_to_save,width = 4, height = 4)
+```
+
+#### Apoptosis-related genes
+
+```{r}
+VlnPlot(data, features = c("BAX", "BID", "PMAIP1","DDIT3", "TXNIP", "RHOB"), group.by = "treatment", stack = TRUE, flip = TRUE) 
+ggsave("Fig_2K.png", path = path_to_save,width = 4, height = 4)
+```
+
+#### Glycolysis and OXPHO-related genes
+
+```{r}
+VlnPlot(data, features = c("HK2", "ENO2", "NDUFC2", "UQCRQ", "ATP5MF"), group.by = "treatment", stack = TRUE, flip = TRUE)
+ggsave("Fig_2L.png", path = path_to_save,width = 4, height = 5)
+```
+
+#### Fatty acid ß-oxidation-related genes
+
+```{r}
+VlnPlot(data, features = c("CPT1A", "DECR1"), group.by = "treatment", stack = TRUE, flip = TRUE)
+ggsave("Fig_S1E.png", path = path_to_save,width = 5, height = 3)
+```
+
+#### Hallmark KRAS signaling DOWN
+
+```{r}
+# Create a list of the genes of the Hallmark KRAS signaling down signature present in the DEG upon treatment
+markers_KRAS_SIGNALING_DN <-  markers %>% 
+  filter(gene %in% Signatures[["HALLMARK_KRAS_SIGLING_DN"]])
+
+# Select the 20 most upregulated genes upon treatment
+top20_up_genes <- markers_KRAS_SIGNALING_DN%>%
+  arrange(desc(avg_log2FC)) %>%  # Sort by decreasing log2FC
+  slice_head(n = 20)
+genes_to_plot <- top20_up_genes$gene
+
+# Plot the expression of these genes in control and treated cells
+DotPlot(data, 
+        features = genes_to_plot, group.by = "treatment",  scale = T) +
+  coord_flip() 
+ggsave("Fig_S1H.png", path = path_to_save)
+
+rm(markers_KRAS_SIGNALING_DN, top20_up_genes)
+```
+
+#### TK-RR Violin plot
+
+```{r}
+VlnPlot(data, features = c("TK1", "RRM1"), group.by = "treatment") 
+ggsave("Fig_4B.png", path = path_to_save, height=4, width =6)
+```
+
+
+## Venn diagram of resistance and persistence genes and dataset's DEG
+```{r}
+
+# INPUT: Upload resistance- & persistence- associated genes from the supplementary data excel sheet 
+df <- read_excel("/Users/fauveauc/Documents/R_studio/A549 analysis/Supplemental_tables.xlsx", sheet = "Table S.3")
+resistance_genes <- df[[2]]
+persistence_genes <- df[[1]]
+resistance_genes <- resistance_genes[!is.na(resistance_genes)]
+persistence_genes <- persistence_genes[!is.na(persistence_genes)]
+
+# List of significantly deregulated genes (DEG)
+Idents(data)<- "treatment"
+markers2<- FindMarkers(data,ident.1 = "treated" ,ident.2 = "control" ,logfc.threshold = 0.025, min.pct = 0.3)
+markers2<- markers2 %>% dplyr::filter(p_val_adj < 0.05) 
+
+# Venn diagram of the overlap between resistance genes, persistence genes and DEG
+png(file.path(path_to_save, "Fig_2I.png"))
+venn.plot <- draw.triple.venn(
+  area1 = length(persistence_genes),
+  area2 = length(resistance_genes),
+  area3 = length(rownames(markers2)),
+  n12 = length(intersect(persistence_genes, resistance_genes)),
+  n13 = length(intersect(persistence_genes,rownames(markers2))),
+  n23 = length(intersect(resistance_genes, rownames(markers2))),
+  n123 = length(Reduce(intersect, list(rownames(markers2), resistance_genes, persistence_genes))),
+  category = c("Persistence", "Resistance", "DEG"), 
+  fill = c("blue", "red", "green"),
+   alpha = 0.5,
+  cex = 1.5,
+  cat.cex = 1.5,
+  lwd = 2,
+  cat.fontfamily = "Arial"
+)
+
+grid.newpage()
+grid.draw(venn.plot)
+dev.off()
+
+rm(df, markers2, venn.plot, persistence_genes, resistance_genes)
+
+```

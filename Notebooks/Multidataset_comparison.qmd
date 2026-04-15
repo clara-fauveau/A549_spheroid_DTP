@@ -1,0 +1,961 @@
+---
+title: "Multidataset Comparison"
+format:
+  html:
+    toc: true
+    number-sections: true
+execute:
+  cache: false
+  freeze: auto
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+# Package & object loading
+
+```{r}
+library(Matrix)
+library(dplyr)
+library(Seurat)
+library(patchwork)
+library(ggplot2)
+library(cowplot)
+library(SingleCellExperiment)
+library(hdf5r)
+library(hexbin)
+library(tibble)
+library(dplyr)
+library(fgsea)
+library(msigdbr)
+library(reshape2)
+library(ComplexHeatmap)
+library (tidyr)
+library(colorRamp2)
+library(readxl)
+library(clusterProfiler)
+library(enrichplot)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(openxlsx2)
+library(svglite)
+library(ggplot2)
+library(ggVennDiagram)
+library(AUCell)
+
+
+# INPUT : Load the A549 spheroid seurat object 
+data <- readRDS(file = "/Users/fauveauc/Documents/R_studio/A549 analysis/seurat_object_A549_pers_final.rds")
+
+# INPUT : Obtain signatures from the supplementary tables of the publication :
+  #Load the excel file
+df <- read_excel("/Users/fauveauc/Documents/R_studio/A549 analysis/Supplemental_tables.xlsx", sheet = "Table S.7")
+  # transfrom it into a list containing the different signatures 
+Signatures <- lapply(seq_len(nrow(df)), function(i) {
+  g <- unlist(df[i, -1], use.names = FALSE)
+  g <- as.character(g)
+  g <- trimws(g)
+  g <- g[!is.na(g) & g != ""]
+  unique(g)
+})
+names(Signatures) <- df[[1]]
+
+# OUTPUT: Determine the path to the directory where the figures and table will be saved
+path_to_save <- "/Users/fauveauc/Documents/R_studio/A549 analysis/figures_and_tables"
+
+
+rm(df)
+```
+
+# Preclinical datasets comparison
+
+## Pathway comparison
+
+### Datasets preparation for GSEA (no pvalue filtering)
+
+```{r}
+# Creation of a data frame containing the DEG of the A549 spheroids upon treatment
+Idents(data)<-"treatment"
+markers<- FindMarkers(data,ident.1 = "treated" ,ident.2 = "control" ,logfc.threshold = 0, min.pct = 0.3)
+markers_dataset<- markers %>% dplyr::select(-p_val, -p_val_adj, -pct.1, -pct.2)%>% dplyr::rename(Rankvalue = avg_log2FC)
+markers_dataset$Gene <- rownames(markers_dataset)
+
+# Creation of DEG data frames from literature
+##### Dhimolea et al. 
+
+# INPUT : Load the excel Dhimolea et al. Supplementary table  
+Dhimolea <- read_excel("/Volumes/projects/Persist-seq/Clara/bio-info/CAF crosstalk project/object_jed/01042025_comparison_with_lit/tables/Dhimolea_tableS1.xlsx")
+
+# Extract datasets and format the data frames 
+Dhimolea <- Dhimolea%>% distinct(symbol, .keep_all = TRUE) 
+Dhimolea_HCI002<- Dhimolea %>% dplyr::select( HCI002_Org_Doc_vs_HCI002_Org_Veh_log2FoldChange, symbol)%>% dplyr::rename(Rankvalue = HCI002_Org_Doc_vs_HCI002_Org_Veh_log2FoldChange,Gene= symbol)
+
+Dhimolea_PM154<- Dhimolea %>% dplyr::select( PM154_Org_Doc_vs_PM154_Org_Veh_log2FoldChange, symbol)%>% dplyr::rename(Rankvalue = PM154_Org_Doc_vs_PM154_Org_Veh_log2FoldChange,Gene= symbol)
+
+###### Hangauer et al. 
+
+# INPUT : Load the excel Hangauer et al. Supplementary table  
+Hangauer <- read_excel("/Volumes/projects/Persist-seq/Clara/bio-info/CAF crosstalk project/object_jed/01042025_comparison_with_lit/tables/Hangauer_S1.xlsx")
+
+# Format the data frame
+Hangauer<- Hangauer %>% dplyr::select(-q_value, -`RefSeq IDs`, -`Parental FPKM`, -`Persister FPKM` )%>% dplyr::rename(Rankvalue = foldchange, Gene= `Gene ID`)
+Hangauer <- Hangauer %>% distinct(Gene, .keep_all = TRUE) 
+Hangauer$Rankvalue <- as.numeric(Hangauer$Rankvalue)
+Hangauer$Rankvalue <- log2(Hangauer$Rankvalue)
+
+###### Moghal et al. 
+
+# INPUT : Load the excel Moghal et al. DEG list 
+Moghal <- read_excel("/Volumes/projects/Persist-seq/Clara/bio-info/CAF crosstalk project/object_jed/01042025_comparison_with_lit/datasets/Moghal.xlsx")
+
+# Format the data frame
+Moghal<- Moghal %>% dplyr::select(Gene.symbol, logFC)%>% dplyr::rename(Rankvalue = `logFC`, Gene = `Gene.symbol`) 
+
+######  Rehman et al.
+
+# INPUT : Load the excel Rehman et al. Supplementary table  
+Rehman <- read_excel("/Volumes/projects/Persist-seq/Clara/bio-info/CAF crosstalk project/object_jed/01042025_comparison_with_lit/tables/Rehman_S4.xlsx")
+
+# Format the data frame
+colnames(Rehman) <- Rehman[1, ]
+Rehman<- Rehman %>% slice(-1)  %>% dplyr::select(`logFC(DTP/CTRL)`, GeneID) %>%dplyr::rename(Rankvalue = `logFC(DTP/CTRL)`, Gene=GeneID)
+Rehman <- Rehman %>% distinct(Gene, .keep_all = TRUE) 
+
+
+# Within DEG dataframes,  
+#     keep only rows with genes name that match official gene symbols
+#     remove duplicated genes
+#     Ensure Rank values are numeric and different from NA or "-Inf" 
+#     Rank values in descending order
+valid_symbols <- keys(org.Hs.eg.db, keytype = "SYMBOL")
+for (x in c("Rehman", "Moghal", "Dhimolea_HCI002", "Dhimolea_PM154",  "Hangauer", "markers_dataset")){
+  y<- get(x)
+  y <- y[y$Gene %in% valid_symbols,,drop = FALSE ]%>%
+  distinct(Gene, .keep_all = TRUE) 
+  y$Rankvalue <- as.numeric(y$Rankvalue)
+  y <- y %>% filter(!is.na(as.numeric(Rankvalue))) %>%
+  filter(Rankvalue != "-Inf")  
+  y<- arrange(y, desc(Rankvalue))
+  assign(x, y)
+}
+
+# Create a list containing the ranked genes of all the datasets 
+list_datasets <- list(This_study=markers_dataset, Rehman=Rehman, Moghal=Moghal, Dhimolea_HCI002=Dhimolea_HCI002, Dhimolea_PM154=Dhimolea_PM154,Hangauer=Hangauer)
+
+ranked_lists <- lapply(list_datasets, function(df) {
+  setNames(df$Rankvalue, df$Gene)  })
+
+rm(markers_dataset, Moghal, Rehman, y, x, valid_symbols, Hangauer, Dhimolea, Dhimolea_HCI002, Dhimolea_PM154)
+```
+
+### GSEA 
+
+```{r}
+
+# Load MSigDB Hallmark gene sets 
+m_df <- msigdbr(species = "Homo sapiens", category = "H")
+head(m_df, 2) %>% as.data.frame
+fgsea_sets <- m_df %>% split(x = .$gene_symbol, f = .$gs_name)
+
+# Add Ascierto signatures to the list of pathways 
+fgsea_sets[["Ascierto_Up"]] <- Signatures[["Ascierto_UP"]]
+fgsea_sets[["Ascierto_Down"]] <- Signatures[["Ascierto_DOWN"]]
+
+# Run the gsea
+gsea_results <- lapply(names(ranked_lists), function(dataset) {
+  fgsea(pathways = fgsea_sets, stats = ranked_lists[[dataset]], nperm = 1000000000)})
+names(gsea_results) <- names(ranked_lists)
+
+# Convert results to a data frame
+gsea_results_df <- do.call(rbind, Map(cbind, gsea_results, dataset = names(gsea_results)))
+
+```
+### Hallmarks heatmap
+```{r}
+# Heatmap preparation
+#   Select only Hallmarks results 
+gsea_results_df_hallmarks <- dplyr::filter(gsea_results_df,!pathway %in% c('Ascierto_Up', "Ascierto_Down"))
+
+#   Create a data frame with pathways names and pvalues 
+#   Remove pathway not significantly modified in at least one dataset and values with NA
+
+heatmap_data_pvalue <- dcast(gsea_results_df_hallmarks, pathway ~ dataset, value.var = "padj", fill = 1)
+heatmap_data_pvalue<- heatmap_data_pvalue[apply(heatmap_data_pvalue[, -1], 1, function(x) any(x < 0.05)), ]
+
+
+#   Create a data frame with pathways names and NES 
+#   Remove pathway not significantly modified in at least one dataset (using the heatmap_data_pvalue dataframe)
+heatmap_data <- dcast(gsea_results_df_hallmarks, pathway ~ dataset, value.var = "NES", fill = 0)
+heatmap_data <- heatmap_data[heatmap_data$pathway %in% heatmap_data_pvalue$pathway, ]
+
+
+#   Convert to matrix
+heatmap_matrix_NES <- as.matrix(heatmap_data[, -1])
+rownames(heatmap_matrix_NES) <- heatmap_data$pathway
+heatmap_matrix_pval <- as.matrix(heatmap_data_pvalue[, -1])
+rownames(heatmap_matrix_pval) <- heatmap_data_pvalue$pathway
+
+# Heatmap generation
+
+svglite(file.path(path_to_save, "Fig_3B.svg"),width = 6, height = 7)
+Heatmap(
+  heatmap_matrix_NES,
+  name = "NES",
+  col = colorRamp2(c(min(heatmap_matrix_NES), 0, max(heatmap_matrix_NES)), c("blue", "white", "red")),
+  cluster_rows = TRUE,
+  cluster_columns = FALSE,  # Disable automatic column clustering
+  column_order = c("This_study","Dhimolea_HCI002", "Dhimolea_PM154","Moghal","Rehman", "Hangauer"),
+  show_column_names = TRUE,
+  show_row_names = TRUE,
+  row_names_gp = gpar(fontsize = 8),
+  row_names_max_width = unit(20, "cm"),
+  heatmap_legend_param = list(
+    title = "NES",
+    labels_gp = gpar(fontsize = 10, fontface = "italic"),
+    legend_width = unit(15, "cm")
+  ),
+  cell_fun = function(j, i, x, y, w, h, fill) {
+    if (!is.na(heatmap_matrix_pval[i, j])) {
+      if (heatmap_matrix_pval[i, j] < 0.001) {
+        grid.text("∗∗∗", x, y, gp = gpar(fontsize = 11, col = "black"))
+      } else if (heatmap_matrix_pval[i, j] < 0.01) {
+        grid.text("∗∗", x, y, gp = gpar(fontsize = 11, col = "black"))
+      } else if (heatmap_matrix_pval[i, j] < 0.05) {
+        grid.text("∗", x, y, gp = gpar(fontsize = 11, col = "black"))
+      }
+    }
+  }
+)
+dev.off()
+
+rm(fgsea_sets, gsea_results_df_hallmarks, heatmap_data, heatmap_data_pvalue, heatmap_matrix_NES, heatmap_matrix_pval, m_df, gsea_results, ranked_lists)
+
+```
+
+### Ascierto signatures heatmap
+
+```{r}
+# Heatmap preparation 
+#   Selection of the Ascierto signature results
+gsea_results_df_ascierto <- dplyr::filter(gsea_results_df,pathway %in% c('Ascierto_Up', "Ascierto_Down"))
+
+#   Create a data frame with pathways names and pvalue 
+heatmap_data_pvalue <- dcast(gsea_results_df_ascierto, pathway ~ dataset, value.var = "padj", fill = 1)
+
+#   Create a data frame with pathways names and NES
+heatmap_data <- dcast(gsea_results_df_ascierto, pathway ~ dataset, value.var = "NES", fill = 0)
+
+# Convert to matrix
+heatmap_matrix_NES <- as.matrix(heatmap_data[, -1])
+rownames(heatmap_matrix_NES) <- heatmap_data$pathway
+heatmap_matrix_pval <- as.matrix(heatmap_data_pvalue[, -1])
+rownames(heatmap_matrix_pval) <- heatmap_data_pvalue$pathway
+
+# Heatmap generation
+
+svglite(file.path(path_to_save, "Fig_4A.svg"),width = 7, height = 4)
+Heatmap(
+  heatmap_matrix_NES,
+  name = "NES",
+  col = colorRamp2(c(min(heatmap_matrix_NES), 0, max(heatmap_matrix_NES)), c("blue", "white", "red")),
+  cluster_rows = TRUE,
+  cluster_columns = TRUE,
+  show_column_names = TRUE,
+  show_row_names = TRUE,
+  row_names_gp = gpar(fontsize = 8),  # Adjust row name size
+  row_names_max_width = unit(20, "cm"),
+  heatmap_legend_param = list(
+    title = "NES",
+    labels_gp = gpar(fontsize = 10, fontface = "italic"),  # Adjust legend label font
+    legend_width = unit(15, "cm")   # Adjust legend width
+  ),
+    cell_fun = function(j, i, x, y, w, h, fill) {
+   # Check for NA values first
+    
+      # Add asterisks based on p-value thresholds
+      if (heatmap_matrix_pval[i, j] < 0.001) {
+        grid.text("∗∗∗", x, y, gp = gpar(fontsize = 30, col = "black"))
+      } else if (heatmap_matrix_pval[i, j] < 0.01) {
+        grid.text("∗∗", x, y, gp = gpar(fontsize = 30, col = "black"))
+      } else if (heatmap_matrix_pval[i, j] < 0.05) {
+        grid.text("∗", x, y, gp = gpar(fontsize = 30, col = "black"))
+      
+    }
+  }
+ 
+)
+
+dev.off()
+
+rm(gsea_results_df_ascierto,gsea_results_df, heatmap_data, heatmap_data_pvalue, heatmap_matrix_NES, heatmap_matrix_pval)
+```
+
+## DTP signature identification
+
+### Datasets preparation (filtering out non-significative DEG)
+Same as previously except this time the DEGs are filtered (pvalue < 0.05) and abs(Rankvalue)>0.1 
+
+```{r}
+# Creation of a data frame containing the significantly DEG of the A549 spheroids upon treatment
+markers_dataset<- markers %>% dplyr::filter(p_val_adj<0.05)
+# Format the data frame
+markers_dataset <-markers_dataset%>% dplyr::select(-p_val, -p_val_adj, -pct.1, -pct.2)%>% dplyr::rename(Rankvalue = avg_log2FC)
+markers_dataset$Gene <- rownames(markers_dataset)
+
+# Creation of DEG data frames from literature
+# Dhimolea et al. 
+
+# INPUT : Load the excel Dhimolea et al. Supplementary table  
+Dhimolea <- read_excel("/Volumes/projects/Persist-seq/Clara/bio-info/CAF crosstalk project/object_jed/01042025_comparison_with_lit/tables/Dhimolea_tableS1.xlsx")
+
+# Extract datasets and format the data frames 
+Dhimolea <- Dhimolea%>% distinct(symbol, .keep_all = TRUE) 
+Dhimolea_HCI002<- Dhimolea %>% dplyr::select( HCI002_Org_Doc_vs_HCI002_Org_Veh_log2FoldChange, symbol)%>% dplyr::rename(Rankvalue = HCI002_Org_Doc_vs_HCI002_Org_Veh_log2FoldChange,Gene= symbol)
+
+Dhimolea_PM154<- Dhimolea %>% dplyr::select( PM154_Org_Doc_vs_PM154_Org_Veh_log2FoldChange, symbol)%>% dplyr::rename(Rankvalue = PM154_Org_Doc_vs_PM154_Org_Veh_log2FoldChange,Gene= symbol)
+
+# Hangauer et al. 
+
+# INPUT : Load the excel Hangauer et al. Supplementary table 
+Hangauer <- read_excel("/Volumes/projects/Persist-seq/Clara/bio-info/CAF crosstalk project/object_jed/01042025_comparison_with_lit/tables/Hangauer_S1.xlsx")
+
+# Format the data frame
+Hangauer<- Hangauer  %>% dplyr::filter(q_value<0.05 )%>% dplyr::select(-q_value, -`RefSeq IDs`, -`Parental FPKM`, -`Persister FPKM` )%>% dplyr::rename(Rankvalue = foldchange, Gene= `Gene ID`)
+Hangauer <- Hangauer %>% distinct(Gene, .keep_all = TRUE) 
+Hangauer$Rankvalue <- as.numeric(Hangauer$Rankvalue)
+Hangauer$Rankvalue <- log2(Hangauer$Rankvalue)
+
+# Moghal et al. 
+
+# INPUT : Load the excel Moghal DEG list
+Moghal <- read_excel("/Volumes/projects/Persist-seq/Clara/bio-info/CAF crosstalk project/object_jed/01042025_comparison_with_lit/datasets/Moghal.xlsx")
+
+# Format the data frame
+Moghal$adj.P.Val <- as.numeric(Moghal$adj.P.Val)
+Moghal<- Moghal %>% dplyr::filter(adj.P.Val<0.05) %>% dplyr::select(Gene.symbol, logFC)%>% dplyr::rename(Rankvalue = `logFC`, Gene = `Gene.symbol`) 
+
+# Rehman et al. 
+
+# INPUT : Load the excel Rehman et al. Supplementary table 
+Rehman <- read_excel("/Volumes/projects/Persist-seq/Clara/bio-info/CAF crosstalk project/object_jed/01042025_comparison_with_lit/tables/Rehman_S4.xlsx")
+
+# Format the data frame
+colnames(Rehman) <- Rehman[1, ]
+Rehman<- Rehman %>% slice(-1)  %>% dplyr::select(`logFC(DTP/CTRL)`, GeneID) %>%dplyr::rename(Rankvalue = `logFC(DTP/CTRL)`, Gene=GeneID)
+Rehman <- Rehman %>% distinct(Gene, .keep_all = TRUE) 
+
+# Upload the list of official gene symbols 
+list_gene_symbols <- read_excel("/Users/fauveauc/Documents/R_studio/A549 analysis/list_symbols_names.xlsx")
+
+# Within DEG dataframes,  
+#     keep only rows with genes name that match official gene symbols
+#     remove duplicated genes
+#     Ensure Rank values are numeric and different from NA or "-Inf" 
+#     Rank values in descending order
+#.    keep only genes with abs(Rankvalue)>0.1 
+for (x in c("Rehman", "Moghal", "Dhimolea_HCI002", "Dhimolea_PM154", "Hangauer", "markers_dataset")){
+  y<- get(x)
+  y <- y[y$Gene %in% list_gene_symbols$valid_symbols,,drop = FALSE ]
+  y <- y[!duplicated(y$Gene), ]
+  y$Rankvalue <- as.numeric(y$Rankvalue)
+  y <- y %>% filter(!is.na(as.numeric(Rankvalue))) %>%
+  filter(Rankvalue != "-Inf") 
+  y<- arrange(y, desc(Rankvalue)) %>% filter(abs(Rankvalue)>0.1)
+  assign(x, y)
+}
+
+list_datasets <- list(This_study=markers_dataset, Rehman=Rehman, Moghal=Moghal,  Dhimolea_PM154=Dhimolea_PM154, Dhimolea_HCI002=Dhimolea_HCI002, Hangauer=Hangauer )
+
+
+rm(markers_dataset, Moghal, Rehman, y, x, valid_symbols, Hangauer, Dhimolea, Dhimolea_HCI002, Dhimolea_PM154)
+```
+
+### Identification of the conserved DEGs
+
+```{r}
+
+# Separation of genes up and down-regulated genes across datasets 
+up_genes_list <- lapply(list_datasets, function(dataset) {
+  as.character(dataset$Gene[dataset$Rankvalue > 0 ]) })
+
+down_genes_list <- lapply(list_datasets, function(dataset) {
+ as.character(dataset$Gene[dataset$Rankvalue < 0 ]) })
+
+# Plot the Venn diagram of Upregulated genes
+ggVennDiagram(up_genes_list, set_size = 5, label = "count", label_size = 3) + ggtitle("Upregulated Genes")+scale_fill_gradient(low = "#FF6B6B", high="#490000")+ scale_x_continuous(expand = expansion(mult = .2))
+
+ggVennDiagram(up_genes_list, set_size = 0, label = "count", label_size = 0) + ggtitle("Upregulated Genes")+scale_fill_gradient(low = "#FF6B6B", high="#490000")+ scale_x_continuous(expand = expansion(mult = .2))
+ggsave("Fig_3C1.png", path = path_to_save, width=6, height = 6)
+
+# Plot the Venn diagram of downregulated genes
+ggVennDiagram(down_genes_list, set_size = 5, label = "count", label_size = 3) + ggtitle("Downregulated Genes") + scale_x_continuous(expand = expansion(mult = .2))
+
+ggVennDiagram(down_genes_list, set_size = 0, label = "count", label_size = 0) + ggtitle("Downregulated Genes")+ scale_x_continuous(expand = expansion(mult = .2))
+ggsave("Fig_3C2.png", path = path_to_save, width=6, height = 6)
+
+
+# Create a vector containing the conserved genes
+common_up_genes <- Reduce(intersect, up_genes_list)
+common_down_genes <- Reduce(intersect, down_genes_list)
+
+# Save the list of conserved genes 
+n <- max(length(common_up_genes), length(common_down_genes))
+df <- data.frame(
+  DTP_UP_SIGNATURE = c(common_up_genes, rep(NA_character_, n - length(common_up_genes))),
+  DTP_DOWN_SIGNATURE  = c(common_down_genes,  rep(NA_character_, n - length(common_down_genes))))
+write_xlsx(df, file.path(path_to_save, "Table_S6.xlsx"))
+
+rm(get_top_up_down,top_lists,up_genes_list, down_genes_list, df,n)
+```
+
+### Visualization of the conserved gene expression in the different datasets
+
+```{r}
+# Helper function to extract fold changes
+extract_fc <- function(genes, dataset_list) {
+  fc_table <- data.frame(Gene = genes)
+  
+  for (name in names(dataset_list)) {
+    dataset <- dataset_list[[name]]
+    dataset <- dataset[dataset$Gene %in% genes, ]
+    fc_table[[name]] <- dataset$Rankvalue[match(fc_table$Gene, dataset$Gene)]
+  }
+  
+  return(fc_table)
+}
+
+# Create fold-change tables
+up_fc_df <- extract_fc(common_up_genes, list_datasets)
+down_fc_df <- extract_fc(common_down_genes, list_datasets)
+
+############ Heatmap for genes of the DTP signature Up 
+# Order the genes of the data.table and then  convert it into a matrix
+up_fc_df[ , -1] <- lapply(up_fc_df[ , -1], function(x) as.numeric(as.character(x))) 
+up_fc_df$mean_fc <- rowMeans(up_fc_df[ , -1], na.rm = TRUE)
+up_fc_df <- up_fc_df[order(up_fc_df$mean_fc, decreasing = F), ]
+up_fc_df$mean_fc <- NULL
+rownames(up_fc_df) <- NULL
+fc_matrix <- up_fc_df %>% column_to_rownames(var = 'Gene')%>%as.matrix()
+
+# Plot as heatmap
+col_fun <- colorRamp2(c(-2, 0, 2), c("blue", "white", "red"))
+png(file.path(path_to_save, "Fig_3D1.png"), width = 1400, height = 300, res = 150)
+pheatmap(t(fc_matrix),
+         cluster_rows = TRUE,
+         cluster_cols = FALSE,
+         color = col_fun,
+         fontsize_row = 10,
+         fontsize_col = 8,
+         scale="none")
+dev.off()
+
+############ Heatmap for genes of the DTP signature Down 
+# Order the genes of the data.table and then  convert it into a matrix
+down_fc_df[ , -1] <- lapply(down_fc_df[ , -1], function(x) as.numeric(as.character(x))) 
+down_fc_df$mean_fc <- rowMeans(down_fc_df[ , -1], na.rm = TRUE)
+down_fc_df <- down_fc_df[order(down_fc_df$mean_fc, decreasing = F), ]
+down_fc_df$mean_fc <- NULL
+rownames(down_fc_df) <- NULL
+fc_matrix <- down_fc_df %>% column_to_rownames(var = 'Gene')%>%as.matrix()
+
+
+# Plot as heatmap
+png(file.path(path_to_save, "Fig_3D2.png"), width = 2000, height = 300, res = 150)
+pheatmap(t(fc_matrix),
+         cluster_rows = TRUE,
+         cluster_cols = FALSE,
+         color = col_fun,
+         fontsize_row = 10,
+         fontsize_col = 7,
+         scale="none")
+dev.off()
+
+
+rm(up_fc_df,down_fc_df, fc_matrix, list_datasets, col_fun, extract_fc, data)
+```
+
+# Comparison to patient NSCLC scRNA-seq 
+
+## Preparation of the scRNA-seq dataset
+The scRNA-seq dataset from Maynard et al., 2020 was obtained from the github repository czbiohub/scell_lung_adenocarcinoma (Data_input/objects/NI02_Epi_Seurat_object_clustered.Rdata)
+
+```{r}
+# INPUT : Enter the path to the scRNA-seq Rdata file containing the Seurat object of the NSCLC patient biopsies 
+rdata_path <- "/Users/fauveauc/Documents/R_studio/A549 analysis/NI02_Epi_Seurat_object_clustered.Rdata"
+
+# Load the Rdata into a clean env 
+e <- new.env(parent = emptyenv())
+load(rdata_path, envir = e)
+ls(envir = e)
+
+# Identify the seurat object
+is_seurat <- vapply(ls(envir = e), function(nm) inherits(e[[nm]], "Seurat"), logical(1))
+seurat_names <- names(is_seurat)[is_seurat]
+
+# Load the seurat object 
+data_patient <- e[[seurat_names]]
+data_patient <- UpdateSeuratObject(data_patient)
+
+#Remove non-cancerous samples ("NAT")
+cells_to_keep <- rownames(data_patient@meta.data)[data_patient$sample_type != "NAT" | is.na(data_patient$sample_type)]
+data_patient <- subset(data_patient, cells = cells_to_keep)
+data_patient <- subset(data_patient, !is.na(biopsy_time_status))
+
+#Add a metadata column named "recist" indicating the RECIST score at the time of biopsy 
+data_patient$recist <- data_patient$biopsy_time_status
+data_patient$recist <-ifelse(data_patient$biopsy_time_status == "Early", data_patient$early_treatment_status, data_patient$recist)
+data_patient$recist <-ifelse(data_patient$biopsy_time_status == "off treatment", "naive", data_patient$recist)
+data_patient$recist <- ifelse(data_patient$recist %in% c("PR","SD"), "PR/SD", data_patient$recist )
+DimPlot(data_patient, reduction = "tsne", group.by = "recist")
+data_patient$recist <- factor(
+  data_patient$recist,
+  levels = c("naive", "PR/SD", "PD")
+)
+DimPlot(data_patient,reduction = "tsne",group.by = "recist",cols = c("#6F9BF8", "#E87D72", "#53B74C" ))
+ggsave( "Fig_2E1.png", path = path_to_save, width=4, height = 3)
+
+#Add a metadata column named "recist_timing" indicating the RECIST score and timepoint (early or late) at the time of biopsy 
+data_patient$recist_timing <- paste(data_patient$recist, data_patient$biopsy_timing, sep = "_")
+
+rm(rdata_path, e, is_seurat, cells_to_keep, seurat_names)
+```
+
+## UMAP with the AUCell score of the DTP signatures
+
+```{r}
+expr_mat <- GetAssayData(data_patient, assay = "RNA")
+
+# Build AUCell rankings
+expr_ranks <- AUCell_buildRankings(expr_mat)
+
+# Calculate AUCell score for the pathway gene set
+
+dtp_up_auc <- AUCell_calcAUC(list(DTP_signature_UP =  common_up_genes), expr_ranks)
+dtp_down_auc <- AUCell_calcAUC(list(DTP_signature_DOWN = common_down_genes), expr_ranks)
+
+#  Extract the score for each cell
+dtp_up_scores <- as.numeric(getAUC(dtp_up_auc)["DTP_signature_UP", ])
+dtp_down_scores <- as.numeric(getAUC(dtp_down_auc)["DTP_signature_DOWN", ])
+
+# Add the score to Seurat metadata
+data_patient$DTP_signature_UP <- dtp_up_scores
+data_patient$DTP_signature_DOWN <- dtp_down_scores
+
+
+# Plot on UMAP
+FeaturePlot(
+  data_patient,
+  features = "DTP_signature_DOWN",
+  reduction = "tsne"
+)+ scale_color_gradientn(colors = c("grey90", "#B3D9FF", "#0073E6", "#001F4D"))
+ggsave( "Fig_2E2.png", path = path_to_save, width=4, height = 3)
+FeaturePlot(
+  data_patient,
+  features = "DTP_signature_UP",
+  reduction = "tsne"
+)+ scale_color_gradientn(colors = c("lightgrey", "pink", "red", "darkred"))
+ggsave("Fig_2E3.png", path = path_to_save, width=4, height = 3)
+
+rm(expr_mat, expr_ranks, dtp_up_auc, dtp_down_auc, dtp_up_scores, dtp_down_scores)
+```
+
+## Heatmap of DTP signatures enrichment
+
+### Comparison of PD, PR/SD and all recist scores combined (figure 3.F)
+
+```{r}
+# Generation of the DEG for the GSEA
+Idents(data_patient)<-"recist"
+markers_tr<- FindMarkers(data_patient,ident.1 = c("PR/SD", "PD") ,ident.2 = "naive" ,logfc.threshold = 0, min.pct = 0.3)
+markers_PD<- FindMarkers(data_patient,ident.1 =  "PD" ,ident.2 = "naive" ,logfc.threshold = 0, min.pct = 0.3)
+markers_PRSD<- FindMarkers(data_patient,ident.1 = "PR/SD" ,ident.2 = "naive" ,logfc.threshold = 0, min.pct = 0.3)
+
+list_comparisons <-c( "markers_PD","markers_PRSD","markers_tr")
+
+
+# Preparation of the ranked list of genes for the GSEA
+ranked_list <- lapply(list_comparisons, function(dataset_name) {
+  # Creates a temporary dataframe containing for one dataset, one column with genes and  one with associated forlchanges
+  temp_df <- get(dataset_name)
+  temp_df$gene <- rownames(temp_df)
+  temp_df$foldchange <- temp_df$avg_log2FC
+  
+  # Convert foldchange to numeric
+  temp_df$foldchange <- as.numeric(as.character(temp_df$foldchange))
+  
+  # Remove rows with NA 
+  temp_df <- temp_df[!is.na(temp_df$foldchange), ]
+  
+  #Remove duplicate Genes
+  temp_df <- temp_df %>%  distinct(gene, .keep_all = TRUE) 
+  
+  # Sort by foldchange in descending order
+  temp_df <- temp_df[order(-temp_df$foldchange), ]
+  
+  # Return a named list with genes and values
+  list(
+    genes = temp_df$gene,
+    foldchange = temp_df$foldchange
+  )
+})
+# Add dataset names as list names
+names(ranked_list) <- list_comparisons
+
+# Prepare the pathways
+# Load gene sets 
+fgsea_sets <- list()
+m_df <- msigdbr(species = "Homo sapiens", category = "H")
+head(m_df, 2) %>% as.data.frame
+fgsea_sets <- m_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets[["DTP_Signature_Down"]] <- common_down_genes
+fgsea_sets[["DTP_Signature_Up"]] <- common_up_genes
+
+# GSEA
+gsea_results <- lapply(names(ranked_list), function(dataset) {
+   stats_vector <- setNames(ranked_list[[dataset]]$foldchange, ranked_list[[dataset]]$genes)
+  fgsea(pathways = fgsea_sets, stats = stats_vector)
+})
+names(gsea_results) <- names(ranked_list)
+
+# Convert results to a data frame
+gsea_results_df <- do.call(rbind, Map(cbind, gsea_results, dataset = names(gsea_results)))
+
+#  Heatmap 
+#Selection of the results for the DTP signature pathways
+gsea_results_df_DTP <- dplyr::filter(gsea_results_df,pathway %in% c('DTP_Signature_Down', "DTP_Signature_Up"))
+
+# Data table preparation
+# Create a data frame with patwhays and NES 
+heatmap_data_pvalue <- dcast(gsea_results_df_DTP, dataset ~ pathway,, value.var = "padj", fill = 1)
+
+heatmap_data <- dcast(gsea_results_df_DTP, dataset ~ pathway,, value.var = "NES", fill = 0)
+
+# Convert to matrix
+heatmap_matrix_NES <- as.matrix(heatmap_data[, -1])
+rownames(heatmap_matrix_NES) <- heatmap_data$dataset
+heatmap_matrix_pval <- as.matrix(heatmap_data_pvalue[, -1])
+rownames(heatmap_matrix_pval) <- heatmap_data_pvalue$dataset
+
+svglite(file.path(path_to_save, "Fig_3F.svg"),width = 5, height = 4)
+Heatmap(
+  heatmap_matrix_NES,
+  name = "NES",
+  col = colorRamp2(c(min(heatmap_matrix_NES), 0, max(heatmap_matrix_NES)), c("blue", "white", "red")),
+  cluster_rows = T,
+  cluster_columns = F,
+  show_column_names = TRUE,
+  show_row_names = TRUE,
+  row_names_side = "left",
+  row_names_gp = gpar(fontsize = 8),  # Adjust row name size
+  row_names_max_width = unit(20, "cm"),
+  heatmap_legend_param = list(
+    title = "NES",
+    labels_gp = gpar(fontsize = 10, fontface = "italic"),  # Adjust legend label font
+    legend_width = unit(15, "cm")   # Adjust legend width
+  ),
+    cell_fun = function(j, i, x, y, w, h, fill) {
+   # Check for NA values first
+    
+      # Add asterisks based on p-value thresholds
+      if (heatmap_matrix_pval[i, j] < 0.001) {
+        grid.text("∗∗∗", x, y, gp = gpar(fontsize = 35, col = "black"))
+      } else if (heatmap_matrix_pval[i, j] < 0.01) {
+        grid.text("∗∗", x, y, gp = gpar(fontsize = 35, col = "black"))
+      } else if (heatmap_matrix_pval[i, j] < 0.05) {
+        grid.text("∗", x, y, gp = gpar(fontsize = 35, col = "black"))
+      
+    }
+  }
+ 
+)
+dev.off()
+rm(markers_tr, markers_PD, markers_PRSD, list_comparisons, ranked_list, gsea_results_df, gsea_results, gsea_results_df_DTP, heatmap_data, heatmap_data_pvalue, heatmap_matrix_NES, heatmap_matrix_pval)
+```
+
+### Comparison PD, PR/SD across timepoints (figure 3.G)
+
+```{r}
+# Generation of the DEG for the GSEA
+Idents(data_patient)<-"recist_timing"
+markers_early_naivevsPD<- FindMarkers(data_patient,ident.1 = "PD_Early" ,ident.2 = "naive_Baseline" ,logfc.threshold = 0, min.pct = 0.3)
+markers_early_naivevsPRSD<- FindMarkers(data_patient,ident.1 = "PR/SD_Early" ,ident.2 = "naive_Baseline" ,logfc.threshold = 0, min.pct = 0.3)
+
+markers_late_naivevsPD<- FindMarkers(data_patient,ident.1 = "PD_Late" ,ident.2 = "naive_Baseline" ,logfc.threshold = 0, min.pct = 0.3)
+markers_late_naivevsPRSD<- FindMarkers(data_patient,ident.1 = "PR/SD_Late" ,ident.2 = "naive_Baseline" ,logfc.threshold = 0, min.pct = 0.3)
+
+list_comparisons <-c("markers_early_naivevsPD", "markers_early_naivevsPRSD", "markers_late_naivevsPD", "markers_late_naivevsPRSD")
+
+
+# Preparation of the ranked list of genes for the GSEA
+ranked_list <- lapply(list_comparisons, function(dataset_name) {
+  # Creates a temporary dataframe containing for one dataset, one column with genes and  one with associated forlchanges
+  temp_df <- get(dataset_name)
+  temp_df$gene <- rownames(temp_df)
+  temp_df$foldchange <- temp_df$avg_log2FC
+  
+  # Convert foldchange to numeric
+  temp_df$foldchange <- as.numeric(as.character(temp_df$foldchange))
+  
+  # Remove rows with NA 
+  temp_df <- temp_df[!is.na(temp_df$foldchange), ]
+  
+  # Remove duplicate Genes
+  temp_df <- temp_df %>%  distinct(gene, .keep_all = TRUE) 
+  
+  # Sort by foldchange in descending order
+  temp_df <- temp_df[order(-temp_df$foldchange), ]
+  
+  # Return a named list with genes and values
+  list(
+    genes = temp_df$gene,
+    foldchange = temp_df$foldchange
+  )
+})
+# Add dataset names as list names
+names(ranked_list) <- list_comparisons
+
+
+# GSEA
+gsea_results <- lapply(names(ranked_list), function(dataset) {
+   stats_vector <- setNames(ranked_list[[dataset]]$foldchange, ranked_list[[dataset]]$genes)
+  fgsea(pathways = fgsea_sets, stats = stats_vector)
+})
+names(gsea_results) <- names(ranked_list)
+
+# Convert results to a data frame
+gsea_results_df <- do.call(rbind, Map(cbind, gsea_results, dataset = names(gsea_results)))
+
+# Heatmap 
+# Selection of the results for the DTP signature pathways
+gsea_results_df_DTP <- dplyr::filter(gsea_results_df,pathway %in% c('DTP_Signature_Down', "DTP_Signature_Up"))
+
+# Data table preparation
+# Create a data frame with patwhays and NES 
+heatmap_data_pvalue <- dcast(gsea_results_df_DTP, dataset ~ pathway,, value.var = "padj", fill = 1)
+
+heatmap_data <- dcast(gsea_results_df_DTP, dataset ~ pathway,, value.var = "NES", fill = 0)
+
+# Convert to matrix
+heatmap_matrix_NES <- as.matrix(heatmap_data[, -1])
+rownames(heatmap_matrix_NES) <- heatmap_data$dataset
+heatmap_matrix_pval <- as.matrix(heatmap_data_pvalue[, -1])
+rownames(heatmap_matrix_pval) <- heatmap_data_pvalue$dataset
+
+svglite(file.path(path_to_save, "Fig_3G.svg"),width = 5, height = 4)
+Heatmap(
+  heatmap_matrix_NES,
+  name = "NES",
+  col = colorRamp2(c(min(heatmap_matrix_NES), 0, max(heatmap_matrix_NES)), c("blue", "white", "red")),
+  cluster_rows = T,
+  cluster_columns = F,
+  show_column_names = TRUE,
+  show_row_names = TRUE,
+  row_names_side = "left",
+  row_names_gp = gpar(fontsize = 8),  # Adjust row name size
+  row_names_max_width = unit(20, "cm"),
+  heatmap_legend_param = list(
+    title = "NES",
+    labels_gp = gpar(fontsize = 10, fontface = "italic"),  # Adjust legend label font
+    legend_width = unit(15, "cm")   # Adjust legend width
+  ),
+    cell_fun = function(j, i, x, y, w, h, fill) {
+   # Check for NA values first
+    
+      # Add asterisks based on p-value thresholds
+      if (heatmap_matrix_pval[i, j] < 0.001) {
+        grid.text("∗∗∗", x, y, gp = gpar(fontsize = 35, col = "black"))
+      } else if (heatmap_matrix_pval[i, j] < 0.01) {
+        grid.text("∗∗", x, y, gp = gpar(fontsize = 35, col = "black"))
+      } else if (heatmap_matrix_pval[i, j] < 0.05) {
+        grid.text("∗", x, y, gp = gpar(fontsize = 35, col = "black"))
+      
+    }
+  }
+ 
+)
+dev.off()
+
+rm(markers_early_naivevsPD, markers_early_naivevsPRSD, markers_late_naivevsPD, markers_late_naivevsPRSD, list_comparisons, ranked_list, gsea_results_df, gsea_results, gsea_results_df_DTP, heatmap_data, heatmap_data_pvalue, heatmap_matrix_NES, heatmap_matrix_pval, data_patient)
+```
+
+# Comparison to bulk MRD datasets
+
+## Data preparation
+
+```{r}
+# INPUT : Enter the path to the Supplementary table 2 of Liu et al., 2024.
+Liu_MRD_dataframe <- read_excel("/Volumes/projects/Persist-seq/Clara/bio-info/CAF crosstalk project/object_jed/01042025_comparison_with_lit/table_patient_sig/Liu_40164_2024_509_MOESM2_ESM.xlsx")
+Liu_MRD_dataframe <- Liu_MRD_dataframe[-1, ]
+
+# Creation of a list containing ranked DEG of each datasets
+ranked_list <- lapply(names(Liu_MRD_dataframe)[-1], function(dataset_name) {
+  # Creates a temporary dataframe containing for one dataset, one column with genes and  one with associated forlchanges
+  temp_df <- Liu_MRD_dataframe[, c("gene", dataset_name)]
+  colnames(temp_df) <- c("gene", "foldchange")
+  
+  # Convert foldchange to numeric
+  temp_df$foldchange <- as.numeric(as.character(temp_df$foldchange))
+  
+  # Remove rows with NA 
+  temp_df <- temp_df[!is.na(temp_df$foldchange), ]
+  
+  #Remove duplicate Genes
+  temp_df <- temp_df %>%  distinct(gene, .keep_all = TRUE) 
+  
+  # Sort by foldchange in descending order
+  temp_df <- temp_df[order(-temp_df$foldchange), ]
+  
+  # Return a named list with genes and values
+  list(
+    genes = temp_df$gene,
+    foldchange = temp_df$foldchange
+  )
+})
+
+# Add dataset names as list names
+names(ranked_list) <- names(Liu_MRD_dataframe)[-1]
+
+#Uniformization of the dataset names 
+names(ranked_list) <- sub("_BR$", "_BRCA", names(ranked_list))
+names(ranked_list) <- sub("_BRC$", "_BRCA", names(ranked_list))
+names(ranked_list) <- sub("-BRC$", "_BRCA", names(ranked_list))
+names(ranked_list) <- sub("_Re$", "_READ", names(ranked_list))
+names(ranked_list) <- sub("_Rec$", "_READ", names(ranked_list))
+names(ranked_list) <- sub("_CO$", "_COAD", names(ranked_list))
+
+
+rm(Liu_MRD_dataframe)
+```
+
+## GSEA
+
+```{r}
+# Add Ascierto's signature to the list of pathways
+fgsea_sets[["Ascierto_Up"]] <- Signatures[["Ascierto_UP"]]
+fgsea_sets[["Ascierto_Down"]] <- Signatures[["Ascierto_DOWN"]]
+
+# Run GSEA for each dataset
+gsea_results <- lapply(names(ranked_list), function(dataset) {
+   stats_vector <- setNames(ranked_list[[dataset]]$foldchange, ranked_list[[dataset]]$genes)
+  fgsea(pathways = fgsea_sets, stats = stats_vector)
+})
+names(gsea_results) <- names(ranked_list)
+
+# Convert results to a data frame
+gsea_results_df <- do.call(rbind, Map(cbind, gsea_results, dataset = names(gsea_results)))
+
+rm(ranked_list, m_df, fgsea_sets, gsea_results, common_up_genes, common_down_genes)
+```
+
+## Heatmap of DTP signatures enrichment
+
+```{r}
+#Selection of the results for the DTP signature pathways
+gsea_results_df_DTP <- dplyr::filter(gsea_results_df,pathway %in% c('DTP_Signature_Down', "DTP_Signature_Up"))
+
+# Data table preparation
+#  Create a data frames with pathways and either NES score or p_value
+heatmap_data_pvalue <- dcast(gsea_results_df_DTP, dataset ~ pathway,, value.var = "padj", fill = 1)
+
+heatmap_data <- dcast(gsea_results_df_DTP, dataset ~ pathway,, value.var = "NES", fill = 0)
+
+# Convert to matrix
+heatmap_matrix_NES <- as.matrix(heatmap_data[, -1])
+rownames(heatmap_matrix_NES) <- heatmap_data$dataset
+heatmap_matrix_pval <- as.matrix(heatmap_data_pvalue[, -1])
+rownames(heatmap_matrix_pval) <- heatmap_data_pvalue$dataset
+
+# Heatmap generation
+svglite(file.path(path_to_save, "Fig_3H.svg"))
+Heatmap(
+  heatmap_matrix_NES,
+  name = "NES",
+  col = colorRamp2(c(-3, 0, 2), c("blue", "white", "red")),
+  cluster_rows = T,
+  cluster_columns = F,
+  show_column_names = TRUE,
+  show_row_names = TRUE,
+  row_names_side = "left",
+  row_names_gp = gpar(fontsize = 8),  # Adjust row name size
+  row_names_max_width = unit(20, "cm"),
+  heatmap_legend_param = list(
+    title = "NES",
+    labels_gp = gpar(fontsize = 10, fontface = "italic"),  # Adjust legend label font
+    legend_width = unit(15, "cm")   # Adjust legend width
+  ),
+    cell_fun = function(j, i, x, y, w, h, fill) {
+   # Check for NA values first
+    
+      # Add asterisks based on p-value thresholds
+      if (heatmap_matrix_pval[i, j] < 0.001) {
+        grid.text("∗∗∗", x, y, gp = gpar(fontsize = 30, col = "black"))
+      } else if (heatmap_matrix_pval[i, j] < 0.01) {
+        grid.text("∗∗", x, y, gp = gpar(fontsize = 30, col = "black"))
+      } else if (heatmap_matrix_pval[i, j] < 0.05) {
+        grid.text("∗", x, y, gp = gpar(fontsize = 30, col = "black"))
+      
+    }
+  }
+ 
+)
+dev.off()
+
+```
+
+## Ascierto signature Heatmap
+
+```{r}
+# Data preparation 
+#  Selection of the results with the Ascierto signature
+gsea_results_df_ascierto <- dplyr::filter(gsea_results_df,pathway %in% c('Ascierto_Up', "Ascierto_Down"))
+gsea_results_df_ascierto$dataset <- as.factor(gsea_results_df_ascierto$dataset)
+
+
+#Data table preparation
+#  Create a data frames with pathways and either NES score or p_value
+heatmap_data_pvalue <- dcast(gsea_results_df_ascierto, pathway ~ dataset, value.var = "padj", fill = 1)
+
+heatmap_data <- dcast(gsea_results_df_ascierto, pathway ~ dataset, value.var = "NES", fill = 0)
+
+# Convertion to matrix
+heatmap_matrix_NES <- as.matrix(heatmap_data[, -1])
+rownames(heatmap_matrix_NES) <- heatmap_data$pathway
+heatmap_matrix_pval <- as.matrix(heatmap_data_pvalue[, -1])
+rownames(heatmap_matrix_pval) <- heatmap_data_pvalue$pathway
+
+# Heatmap generation
+svglite(file.path(path_to_save, "Fig_S3A.svg"),width = 7, height = 4)
+Heatmap(
+  heatmap_matrix_NES,
+  name = "NES",
+  col = colorRamp2(c(min(heatmap_matrix_NES), 0, max(heatmap_matrix_NES)), c("blue", "white", "red")),
+  cluster_rows = TRUE,
+  cluster_columns = TRUE,
+  show_column_names = TRUE,
+  show_row_names = TRUE,
+  row_names_gp = gpar(fontsize = 8),  # Adjust row name size
+  row_names_max_width = unit(20, "cm"),
+  heatmap_legend_param = list(
+    title = "NES",
+    labels_gp = gpar(fontsize = 10, fontface = "italic"),  # Adjust legend label font
+    legend_width = unit(15, "cm")   # Adjust legend width
+  ),
+    cell_fun = function(j, i, x, y, w, h, fill) {
+   # Check for NA values first
+    
+      # Add asterisks based on p-value thresholds
+      if (heatmap_matrix_pval[i, j] < 0.001) {
+        grid.text("∗∗∗", x, y, gp = gpar(fontsize = 12, col = "black"))
+      } else if (heatmap_matrix_pval[i, j] < 0.01) {
+        grid.text("∗∗", x, y, gp = gpar(fontsize = 12, col = "black"))
+      } else if (heatmap_matrix_pval[i, j] < 0.05) {
+        grid.text("∗", x, y, gp = gpar(fontsize = 12, col = "black"))
+      
+    }
+  }
+ 
+)
+dev.off()
+
+rm(gsea_results_df_ascierto, gsea_results_df, heatmap_data, heatmap_data_pvalue, heatmap_matrix_NES, heatmap_matrix_pval)
+```

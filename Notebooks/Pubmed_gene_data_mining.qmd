@@ -1,0 +1,133 @@
+---
+title: "gene_data_mining"
+format:
+  html:
+    toc: true
+    number-sections: true
+execute:
+  cache: false
+  freeze: auto
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+## Package & object loading
+
+```{r}
+
+library(Seurat)
+library(dplyr)
+library(rentrez) 
+library(openxlsx2)
+
+# INPUT : Load the A549 spheroid seurat object 
+data <- readRDS(file = "/Users/fauveauc/Documents/R_studio/A549 analysis/seurat_object_A549_pers_final.rds")
+
+# OUTPUT: Determine the path to the directory where the figures and table will be saved
+path_to_save <- "/Users/fauveauc/Documents/R_studio/A549 analysis/figures_and_tables"
+
+# INPUT : NCBI API key 
+# Enter below your personal NCBI API key to increase the number of queries you can perform per second 
+Key <- "XX"
+```
+
+
+
+# Data mining of persistence & resistance-associated genes
+
+```{r}
+# Creation of a function performing the datamining 
+search_pubmed2 <- function(gene, category) {
+  Sys.setenv(ENTREZ_KEY = Key)
+  if (category == "resistance") {
+    query <- paste0("(",gene, "[Title/Abstract]) AND (cancer[Title/Abstract]) AND (chemoresistance[Title/Abstract] OR drug resistance[Title/Abstract])")
+  } else if (category == "persistence") {
+    query <- paste0("(",gene, "[Title/Abstract]) AND (cancer[Title/Abstract]) AND (drug persistence[Title/Abstract] OR drug tolerant persister cells[Title/Abstract] OR DTP[Title/Abstract] OR drug tolerance[Title/Abstract])")
+  }
+  
+  results <- entrez_search(db = "pubmed", term = query, retmax = 1)  # Get number of publications
+  return(results$count)  # Return count of articles found
+}
+
+# Seting up the gene list by getting all the genes in the A549 spheroid dataset
+all_genes <- rownames(data)
+
+#data mining of resistance-associated genes 
+safe_search <- function(gene) {
+  tryCatch({
+    result <- search_pubmed2(gene, category = "resistance")
+    if (length(result) == 0 || is.null(result)) return(NA)
+    return(result[[1]])  # or whatever you're extracting
+  }, error = function(e) {
+    return(NA)
+  })
+}
+
+resistance_all <- sapply(all_genes, safe_search)
+
+#data mining of persistence-associated genes 
+safe_search <- function(gene) {
+  tryCatch({
+    result <- search_pubmed2(gene, category = "persistence")
+    if (length(result) == 0 || is.null(result)) return(NA)
+    return(result[[1]])  # or whatever you're extracting
+  }, error = function(e) {
+    return(NA)
+  })
+}
+persistence_all <- sapply(all_genes, safe_search)
+
+
+
+# Save results
+
+resistance_genes  <- all_genes [resistance_all  > 0 ] 
+persistence_genes <- all_genes [persistence_all  > 0 ]
+
+n  <- max(length(resistance_genes), length(persistence_genes))
+df  <- data.frame( 
+  resistance_genes = c(resistance_genes, rep(NA_character_, n - length(resistance_genes))),
+  persistence_genes = c(persistence_genes, rep(NA_character_, n - length(persistence_genes))))
+write_xlsx(df,file.path(path_to_save, "Table_S5.xlsx"))
+
+rm(safe_search, all_genes, resistance_all, persistence_all,search_pubmed2, df, n)
+```
+
+```{r}
+# Creation of a function performing the data-mining 
+search_pubmed <- function(gene, category) {
+  tryCatch({
+    Sys.setenv(ENTREZ_KEY = Key)
+    if (category == "resistance") {
+        query <- paste0("(",gene, "[Title/Abstract]) AND (cancer[Title/Abstract]) AND (chemoresistance[Title/Abstract] OR drug resistance[Title/Abstract])")
+      } else if (category == "persistence") {
+        query <- paste0("(",gene, "[Title/Abstract]) AND (cancer[Title/Abstract]) AND (drug persistence[Title/Abstract] OR drug tolerant persister cells[Title/Abstract] OR DTP[Title/Abstract] OR drug tolerance[Title/Abstract])")
+  }
+    results <- entrez_search(db = "pubmed", term = query, retmax = 1)  # Get number of publications
+    return(results$count)  # Return count of articles found
+  }, error = function(e) {
+    return(NA)
+  })
+}
+
+# Setting up the list of gene to query  by getting all the genes present in the A549 spheroid dataset
+all_genes <- rownames(data)
+
+# Perform the search
+resistance_all <- sapply(all_genes, search_pubmed, category = "resistance")
+persistence_all <- sapply(all_genes, search_pubmed, category = "persistence")
+
+
+# Select genes which have at least one publication associating them with resistance or persistence and save the results in an excel file
+resistance_genes  <- all_genes [resistance_all  > 0 ] 
+persistence_genes <- all_genes [persistence_all  > 0 ]
+
+n  <- max(length(resistance_genes), length(persistence_genes))
+df  <- data.frame( 
+  resistance_genes = c(resistance_genes, rep(NA_character_, n - length(resistance_genes))),
+  persistence_genes = c(persistence_genes, rep(NA_character_, n - length(persistence_genes))))
+write_xlsx(df,file.path(path_to_save, "Table_S5.xlsx"))
+
+rm(safe_search, all_genes, resistance_all, persistence_all,search_pubmed2, df, n)
+```

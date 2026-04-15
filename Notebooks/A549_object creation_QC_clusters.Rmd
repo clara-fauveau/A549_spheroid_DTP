@@ -1,0 +1,131 @@
+---
+title: "A549 spheroids - object creation and pre-processing"
+output: html_notebook
+---
+
+
+
+```{r}
+## Loading Libraries
+library(Rcpp)
+library(harmony)
+library(dplyr)
+library(Seurat)
+library(patchwork)
+library(ggplot2)
+library(cowplot)
+library(harmony)
+
+# OUTPUT : Path to the directory where figures and table will be saved
+path_to_save <- "/Users/fauveauc/Documents/R_studio/A549 analysis/figures_and_tables"
+```
+
+## Creation of the Seurat object
+
+```{r}
+#select the working directory
+setwd("/Volumes/Persist-seq/Clara/bio-info/CAF crosstalk project/filtered_count_tables/")
+
+# import the samples
+dataAc1<-Read10X(data.dir = "PS-TRAN-001a-filtered-feature-bc-matrix/")
+dataAc2<-Read10X(data.dir = "PS-TRAN-001b-filtered-feature-bc-matrix/")
+
+dataAt1<-Read10X(data.dir = "PS-TRAN-002a-filtered-feature-bc-matrix/")
+dataAt2<-Read10X(data.dir = "PS-TRAN-002b-filtered-feature-bc-matrix/")
+dataAt3<-Read10X(data.dir = "PS-TRAN-002c-filtered-feature-bc-matrix/")
+
+# Merge samples
+data <- CreateSeuratObject(counts = cbind(dataAc1, dataAc2, dataAt1, dataAt2, dataAt3))
+
+```
+
+## Merge libraries and metadata addition
+
+```{r}
+
+## Add metadata categories
+data@meta.data$sample <- c(rep("A549 control rep1", ncol(dataAc1)), rep("A549 control rep2", ncol(dataAc2)),rep("A549 treated rep1", ncol(dataAt1)), rep("A549 treated rep2", ncol(dataAt2)), rep("A549 treated rep3", ncol(dataAt3)))
+
+data@meta.data$cond <- c(rep("A549 control", ncol(dataAc1)), rep("A549 control", ncol(dataAc2)),rep("A549 treated", ncol(dataAt1)), rep("A549 treated", ncol(dataAt2)), rep("A549 treated", ncol(dataAt3)))
+
+data@meta.data$replicate <- c(rep("rep1", ncol(dataAc1)), rep("rep2", ncol(dataAc2)), rep("rep1", ncol(dataAt1)), rep("rep2", ncol(dataAt2)), rep("rep3", ncol(dataAt3)))
+
+data@meta.data$treatment <- c(rep("control", ncol(dataAc1)), rep("control", ncol(dataAc2)), rep("treated", ncol(dataAt1)), rep("treated", ncol(dataAt2)), rep("treated", ncol(dataAt3)))
+
+rm(dataAc1, dataAc2, dataAt1, dataAt2, dataAt3)
+
+```
+
+## QC
+
+```{r}
+#Remove cells with more than 10% of mitochondiral gene expression 
+data[["percent.mt"]] <- PercentageFeatureSet(data, pattern = "^MT-")
+dim(data)
+data <- subset(data, subset = percent.mt < 10)
+dim(data)
+#Remove cells with less than 200 genes detected
+data <- subset(data, subset = nFeature_RNA > 200)
+dim(data)
+
+#Plot QC metrics
+Idents(data)<-"treatment"
+VlnPlot(data,split.by = "sample", features = "nFeature_RNA")
+ggsave("Fig_S1A1.png", path = path_to_save,  width = 15, height = 4.5,units = "in")
+
+VlnPlot(data,split.by = "sample", features = "nCount_RNA", y.max = 100000)
+ggsave("Fig_S1A2.png", path = path_to_save,  width = 15, height = 4.5,units = "in")
+
+VlnPlot(data,split.by = "sample", features = "percent.mt")
+ggsave("Fig_S1A3.png", path = path_to_save,  width = 15, height = 4.5,units = "in")
+
+```
+
+## Normalization and first UMAP of the unintegrated data
+
+```{r}
+
+#Normalization and variable feature selection
+data <- NormalizeData(data, normalization.method = "LogNormalize", scale.factor = 10000)
+data <- FindVariableFeatures(data, selection.method = "vst", nfeatures = 2000)
+
+# plot variable features 
+top10 <- head(VariableFeatures(data), 10)
+plot1 <- VariableFeaturePlot(data)
+LabelPoints(plot = plot1, points = top10, repel = TRUE)
+
+data <- ScaleData(data)
+
+data <- RunPCA(data, features = VariableFeatures(data), npcs = 20, verbose = FALSE)
+
+#Plot the elbow plot to determine the number of dimensions to use for downstream analysis
+ElbowPlot(data, ndims = 20)
+data <- FindNeighbors(data, dims = 1:20, reduction = "pca")
+data <- FindClusters(data, resolution = 0.5, cluster.name = "unintegrated_clusters")
+
+data <- RunUMAP(data, dims = 1:20, reduction = "pca", reduction.name = "umap.unintegrated")
+
+rm(plot1, top10)
+
+```
+
+## Harmony Integration
+```{r}
+# harmony integration
+data <- RunHarmony(data, group.by.vars = "replicate", plot_convergence=FALSE)
+
+data <- FindNeighbors(data, reduction = "harmony", dims = 1:20)
+data <- FindClusters(data, resolution = 0.5, cluster.name = "harmony_clusters")
+data <- RunUMAP(data, reduction = "harmony", dims = 1:20, reduction.name = "umap.harmony")
+
+# plot before / after integration
+p1 <- DimPlot(data, reduction = "umap.unintegrated", group.by = "sample")
+p2 <- DimPlot(data, reduction = "umap.harmony", group.by = "sample")
+plot_grid(p1, p2)
+ggsave("Fig_S1B.png", path = path_to_save,  width = 15, height = 4.5,units = "in")
+
+#Save the object (optional)
+#saveRDS(data, file = file.path(path_to_save, "seurat_object_A549_pers.rds"))
+
+rm(p1, p2)
+```
