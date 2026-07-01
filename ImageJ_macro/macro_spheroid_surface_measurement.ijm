@@ -25,7 +25,7 @@ for (i=0; i<list.length; i++) {
 		run("8-bit");
 		setAutoThreshold("Default");
 		
-		//Identifies spheroid outiline and measures spheroid area		
+		//Identifies spheroid outline and measures spheroid area		
 		run("Analyze Particles...", "size=0.0100-Infinity circularity=0.03-1.00 show=Outlines display exclude include summarize");  
        
        //Save the image of the segmentation outline  
