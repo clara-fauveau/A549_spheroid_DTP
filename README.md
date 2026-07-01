@@ -10,7 +10,7 @@ This GitHub repository contains:
 - **4 R Notebooks** containing different parts of the pipeline: 
   - A549_object creation_QC_clusters
   - A549_spheroids_analysis
-  - gene_data_mining
+  - Pubmed_gene_data_mining
   - Multidataset_comparison
  
 ## Analysis of the scRNA-seq
@@ -37,9 +37,9 @@ This notebook contains the code used to analyse the scRNA-seq data of A549 spher
 
 Inputs needed to run the code: 
 - The seurat object containing the A549 spheroids scRNA-seq data (named "data" in the code)
-- The supplemental table of the publication which contains the signatures list and the list of resistance- and persistence-associated genes indentified from PubMed publications
+- The supplemental table excel file of the publication which contains the signatures list and the list of resistance- and persistence-associated genes indentified from PubMed publications
 
-#### Gene_data_mining 
+#### Pubmed_gene_data_mining
 This notebook contains the code used to do generate the list of resistance- and persistence-associated genes using keywords present in titles or abstracts of PubMed publications
 
 Input needed to run the code: 
@@ -50,7 +50,8 @@ This notebook contains the code used to do the multi-dataset comparison, generat
 
 Inputs needed to run the code : 
 - The seurat object containing the A549 spheroids scRNA-seq data (named "data" in the code)
-- The supplemental table file of the publication which contains the signatures list
+- The supplemental table excel file of the publication which contains the signatures list
+- The excel file "list_symbols_names.xlsx" which contains the offical genes symbols from the org.HS.eg.db package. This excel file can be download from this GitHub repository.
 - Preclinical datasets :
   - Supplementary Table 1 of the publication Dhimolea et al., 2021 (DOI: 10.1016/j.ccell.2020.12.002)
   - Supplementary Table 1 of the publication Hangauer et al., 2017 (DOI: 10.1038/nature24297)
