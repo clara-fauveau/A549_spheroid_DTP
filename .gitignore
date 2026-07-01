@@ -1,10 +1,10 @@
+R_notebooks/A549_object creation_QC_clusters.nb.html
 code_pour_moi/
 api_key_NCBI.rtf
 comparison_liu_rnaseq_score.qmd
 figures/
 key
 key.pub
-Notebooks/A549_object creation_QC_clusters.nb.html
 .DS_Store
 .Rprofile
 .Rproj.user
@@ -46,3 +46,4 @@ symbol_genes.rds
 tables/
 test_MRD_2.qmd
 .DS_Store
+.positai

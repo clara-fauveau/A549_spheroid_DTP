@@ -54,7 +54,7 @@ data <- readRDS(file = "/Users/fauveauc/Documents/R_studio/A549 analysis/seurat_
 
 # INPUT : Obtain signatures from the supplementary tables of the publication :
   #Load the excel file
-df <- read_excel("/Users/fauveauc/Documents/R_studio/A549 analysis/Supplemental_tables.xlsx", sheet = "Table S.7")
+df <- read_excel("/Users/fauveauc/Documents/R_studio/A549 analysis/Supplemental_tables.xlsx", sheet = "Table S.8")
   # transfrom it into a list containing the different signatures 
 Signatures <- lapply(seq_len(nrow(df)), function(i) {
   g <- unlist(df[i, -1], use.names = FALSE)
@@ -733,7 +733,7 @@ ggsave("Fig_4B.png", path = path_to_save, height=4, width =6)
 ```{r}
 
 # INPUT: Upload resistance- & persistence- associated genes from the supplementary data excel sheet 
-df <- read_excel("/Users/fauveauc/Documents/R_studio/A549 analysis/Supplemental_tables.xlsx", sheet = "Table S.3")
+df <- read_excel("/Users/fauveauc/Documents/R_studio/A549 analysis/Supplemental_tables.xlsx", sheet = "Table S.5")
 resistance_genes <- df[[2]]
 persistence_genes <- df[[1]]
 resistance_genes <- resistance_genes[!is.na(resistance_genes)]

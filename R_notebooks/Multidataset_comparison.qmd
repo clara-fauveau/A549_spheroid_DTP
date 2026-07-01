@@ -49,7 +49,7 @@ data <- readRDS(file = "/Users/fauveauc/Documents/R_studio/A549 analysis/seurat_
 
 # INPUT : Obtain signatures from the supplementary tables of the publication :
   #Load the excel file
-df <- read_excel("/Users/fauveauc/Documents/R_studio/A549 analysis/Supplemental_tables.xlsx", sheet = "Table S.7")
+df <- read_excel("/Users/fauveauc/Documents/R_studio/A549 analysis/Supplemental_tables.xlsx", sheet = "Table S.8")
   # transfrom it into a list containing the different signatures 
 Signatures <- lapply(seq_len(nrow(df)), function(i) {
   g <- unlist(df[i, -1], use.names = FALSE)
