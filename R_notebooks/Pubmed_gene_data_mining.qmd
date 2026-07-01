@@ -22,7 +22,19 @@ library(rentrez)
 library(openxlsx2)
 
 # INPUT : Load the A549 spheroid seurat object 
+    #If you have run previously the A549_object creation_QC_clusters, just the reload the saved object 
 data <- readRDS(file = "/Users/fauveauc/Documents/R_studio/A549 analysis/seurat_object_A549_pers_final.rds")
+
+    #If you downloaded the A549 spheroid dataset from the https://provitd.github.io/studies website : 
+RDS_file <- readRDS(file = "/Users/fauveauc/Downloads/A549_spheroid.rds")
+data <- RDS_file$seuratObj
+slot(data[["umap"]], "key") <- "umapharmony_"
+data@reductions$umap.harmony <- data@reductions$umap
+data@reductions$umap <- NULL
+
+data$replicate <- case_when(grepl("rep1$", data$sample) ~ "rep1",grepl("rep2$", data$sample) ~ "rep2",grepl("rep3$", data$sample) ~ "rep3")
+data$replicate <- factor(data$replicate, levels = c("rep1", "rep2", "rep3"))
+data$harmony_clusters <- sub("^cluster-", "", data$harmony_clusters)
 
 # OUTPUT: Determine the path to the directory where the figures and table will be saved
 path_to_save <- "/Users/fauveauc/Documents/R_studio/A549 analysis/figures_and_tables"

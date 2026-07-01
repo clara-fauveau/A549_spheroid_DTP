@@ -50,7 +50,19 @@ library(AUCell)
 library(svglite)
 
 # INPUT : Load the A549 spheroid seurat object 
+    #If you have run previously the A549_object creation_QC_clusters, just the reload the saved object 
 data <- readRDS(file = "/Users/fauveauc/Documents/R_studio/A549 analysis/seurat_object_A549_pers_final.rds")
+
+    #If you downloaded the A549 spheroid dataset from the https://provitd.github.io/studies website : 
+RDS_file <- readRDS(file = "/Users/fauveauc/Downloads/A549_spheroid.rds")
+data <- RDS_file$seuratObj
+slot(data[["umap"]], "key") <- "umapharmony_"
+data@reductions$umap.harmony <- data@reductions$umap
+data@reductions$umap <- NULL
+
+data$replicate <- case_when(grepl("rep1$", data$sample) ~ "rep1",grepl("rep2$", data$sample) ~ "rep2",grepl("rep3$", data$sample) ~ "rep3")
+data$replicate <- factor(data$replicate, levels = c("rep1", "rep2", "rep3"))
+data$harmony_clusters <- sub("^cluster-", "", data$harmony_clusters)
 
 # INPUT : Obtain signatures from the supplementary tables of the publication :
   #Load the excel file
@@ -227,7 +239,7 @@ expr_mat <- GetAssayData(data, assay = "RNA")
 expr_ranks <- AUCell_buildRankings(expr_mat)
 
 # Calculate AUCell score for the pathway gene set
-nrf2_auc <- AUCell_calcAUC(list(NRF2 = Signatures[["NRF2_SIGNATURE_NAMANI"]]), expr_ranks)
+nrf2_auc <- AUCell_calcAUC(list(NRF2 = Signatures[["Namani_NRF2"]]), expr_ranks)
 hypoxia_auc <- AUCell_calcAUC(list(hypoxia = Signatures[["HALLMARK_HYPOXIA"]]), expr_ranks)
 
 # Extract the score for each cell
@@ -704,7 +716,7 @@ ggsave("Fig_S3A.png", path = path_to_save,width = 5, height = 3)
 ```{r}
 # Create a list of the genes of the Hallmark KRAS signaling down signature present in the DEG upon treatment
 markers_KRAS_SIGNALING_DN <-  markers %>% 
-  filter(gene %in% Signatures[["HALLMARK_KRAS_SIGLING_DN"]])
+  filter(gene %in% Signatures[["HALLMARK_KRAS_SIGNALING_DN"]])
 
 # Select the 20 most upregulated genes upon treatment
 top20_up_genes <- markers_KRAS_SIGNALING_DN%>%
