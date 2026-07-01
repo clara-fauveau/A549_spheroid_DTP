@@ -16,8 +16,8 @@ This GitHub repository contains:
 ## Analysis of the scRNA-seq
 ### Data availability and reproducibility 
 The A549 spheroid scRNA-seq dataset is available on:
-- the EMBL-EBI Single Cell Expression Atlas platform: https://www.ebi.ac.uk/gxa/sc/experiments/E-ANND-7/results/cell-plots
-- on the https://provitd.github.io/studies website
+- the EMBL-EBI Single Cell Expression Atlas platform: https://www.ebi.ac.uk/gxa/sc/experiments/E-ANND-7/results/cell-plots, as normalized count matrix.
+- on the https://provitd.github.io/studies website, as pre-processed seurat object.
 
 The analysis environment can be reproduced using the `renv.lock` file with the `renv` package.
 
