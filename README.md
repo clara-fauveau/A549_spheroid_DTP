@@ -1,7 +1,7 @@
 # A549_spheroid_DTPs
 This repository contains the analysis pipeline associated with the publication:
 
-**Fauveau et al. (2026). Dissecting residual disease in spheroids reveals pan-cancer persistence signatures and a therapeutic window for Oncolytic Viruses. Molecular Therapy Oncology.**
+**Dissecting residual disease in spheroids reveals pan-cancer persistence signatures and a therapeutic window for oncolytic viruses. Fauveau C, Lawendy E, Deforges J, Cochin S, Moreau B, Balloul JM, Erbs P, Jain S, Laverny G; PERSIST-SEQ Consortium. Molecular Therapy Oncology. 2026. doi: 10.1016/j.omton.2026.201279. PMID: 42438683; PMCID: PMC13356641.**
 
 This study characterizes drug-tolerant persister (DTP) cells in A549 spheroids treated with cisplatin and pemetrexed. Using single-cell RNA-seq data and integrating multiple published datasets, it identifies conserved persistence signatures and explores the potential of oncolytic viruses to target DTPs.
 
@@ -61,5 +61,4 @@ Inputs needed to run the code :
   - The scRNA-seq dataset from Maynard et al., 2020 was obtained from the GitHub repository czbiohub/scell_lung_adenocarcinoma (Data_input/objects/NI02_Epi_Seurat_object_clustered.Rdata)
   - The list of deregulated genes from bulk RNA-seq datasets was obtained from the Supplementary Table 2 of the meta-analysis Liu et al., 2024 (DOI: 10.1186/s40164-024-00509-3)
  
-**If you use this code, please cite:
-Fauveau et al., 2026 (to be modified once published)**
+**If you use this code, please cite Fauveau et al. (2026).**
